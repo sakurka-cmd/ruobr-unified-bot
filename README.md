@@ -6,36 +6,49 @@ Telegram-бот для родителей, позволяющий следить
 - 📘 Домашними заданиями
 - ⭐ Оценками
 
-## Установка
+## Быстрый старт (Docker)
 
 ```bash
-git clone https://github.com/vbardanos/ruobr-telegram-bot.git
+# Клонировать
+git clone https://github.com/sakurka-cmd/ruobr-telegram-bot.git
 cd ruobr-telegram-bot
 
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Создать .env
+cp .env.example .env
+nano .env  # Заполнить данные
+
+# Запустить
+docker-compose up -d
+
+# Логи
+docker-compose logs -f
 ```
 
-## Настройка
+## Установка без Docker
 
-Создайте файл `.env`:
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
+
+pip install -r requirements.txt
+cp .env.example .env
+# Отредактировать .env
+python main.py
+```
+
+## Настройка .env
+
 ```
 BOT_TOKEN=your_telegram_bot_token
 ENCRYPTION_KEY=your_fernet_key
 ADMIN_IDS=123456789
 ```
 
-Генерация ключа шифрования:
+Генерация ключа:
 ```python
 from cryptography.fernet import Fernet
 print(Fernet.generate_key().decode())
-```
-
-## Запуск
-
-```bash
-python main.py
 ```
 
 ## Команды бота
@@ -43,16 +56,35 @@ python main.py
 | Команда | Описание |
 |---------|----------|
 | `/start` | Начало работы |
-| `/set_login` | Настройка логина/пароля Ruobr |
+| `/set_login` | Настройка Ruobr |
 | `/balance` | Баланс питания |
 | `/ttoday` | Расписание сегодня |
 | `/ttomorrow` | Расписание завтра |
 | `/hwtomorrow` | ДЗ на завтра |
-| `/markstoday` | Оценки за сегодня |
+| `/markstoday` | Оценки |
+
+## Docker команды
+
+```bash
+# Запуск
+docker-compose up -d
+
+# Остановить
+docker-compose down
+
+# Пересобрать
+docker-compose up -d --build
+
+# Логи
+docker-compose logs -f
+
+# Статус
+docker-compose ps
+```
 
 ## Технологии
 
-- Python 3.10+
+- Python 3.12
 - aiogram 3.x
 - aiosqlite
 - cryptography
