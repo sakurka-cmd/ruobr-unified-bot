@@ -3,11 +3,12 @@
 """
 import logging
 from datetime import date, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.exceptions import TelegramAPIError
 
 from ..config import config
 from ..database import UserConfig
@@ -141,6 +142,9 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
         lines = [f"📘 <b>Домашнее задание на завтра</b> ({format_date(tomorrow_str)})"]
         found = False
         
+        # Собираем все файлы для отправки отдельно
+        all_files: List[Tuple[str, str, str]] = []  # (file_type, url, subject)
+        
         for child in children:
             lessons = timetable.get(child.id, [])
             child_header_added = False
@@ -173,19 +177,35 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                             clean_text = clean_text[:197] + "..."
                         lines.append(f"     📝 {clean_text}")
                     
-                    # Извлекаем и показываем прикреплённые файлы
+                    # Собираем файлы для отправки
                     files = extract_homework_files(hw_text)
                     for file_type, file_url in files:
-                        if file_type == 'img':
-                            lines.append(f"     🖼 <a href=\"{file_url}\">Изображение</a>")
-                        else:
-                            lines.append(f"     📎 <a href=\"{file_url}\">Файл</a>")
+                        all_files.append((file_type, file_url, lesson.subject))
         
         if not found:
             await status_msg.edit_text("ℹ️ На завтра домашнее задание не найдено.")
         else:
             text = truncate_text("\n".join(lines))
             await status_msg.edit_text(text)
+            
+            # Отправляем файлы отдельными сообщениями
+            if all_files:
+                for file_type, file_url, subject in all_files:
+                    try:
+                        if file_type == 'img':
+                            await message.answer_photo(
+                                photo=file_url,
+                                caption=f"📎 {subject}"
+                            )
+                        else:
+                            await message.answer_document(
+                                document=file_url,
+                                caption=f"📎 {subject}"
+                            )
+                    except TelegramAPIError as e:
+                        logger.warning(f"Failed to send file {file_url}: {e}")
+                        # Если не удалось отправить файл - отправляем ссылку
+                        await message.answer(f"📎 <a href=\"{file_url}\">Файл: {subject}</a>")
             
     except Exception as e:
         logger.error(f"Error getting homework for user {message.chat.id}: {e}")
