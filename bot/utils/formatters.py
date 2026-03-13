@@ -252,3 +252,53 @@ def extract_homework_files(text: str) -> List[Tuple[str, str]]:
         files.append(('img', url))
     
     return files
+
+
+def clean_html_text(text: str) -> str:
+    """
+    Очистка HTML-текста ДЗ от тегов и получение чистого текста.
+    
+    Args:
+        text: HTML-текст.
+        
+    Returns:
+        Очищенный текст.
+    """
+    if not text:
+        return ""
+    
+    # Заменяем <br> и </div> на переносы строк
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)
+    
+    # Заменяем &nbsp; на пробел
+    text = text.replace('&nbsp;', ' ')
+    
+    # Удаляем все остальные HTML-теги
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # Убираем множественные пробелы и переносы
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n\s*\n', '\n', text)
+    
+    return text.strip()
+
+
+def has_meaningful_text(text: str) -> bool:
+    """
+    Проверка, содержит ли текст полезную информацию (не только пробелы и пустые параграфы).
+    
+    Args:
+        text: Текст для проверки.
+        
+    Returns:
+        True если текст содержит полезную информацию.
+    """
+    if not text:
+        return False
+    
+    # Очищаем HTML
+    clean = clean_html_text(text)
+    
+    # Проверяем что есть хоть какой-то текст (минимум 3 символа)
+    return len(clean) >= 3

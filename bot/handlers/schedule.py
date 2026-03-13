@@ -17,7 +17,8 @@ from ..services import (
 )
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
-    format_weekday, truncate_text, extract_homework_files
+    format_weekday, truncate_text, extract_homework_files, 
+    clean_html_text, has_meaningful_text
 )
 from .balance import require_authentication
 
@@ -163,8 +164,16 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                     title = hw.get("title", "")
                     lines.append(f"  📖 {lesson.subject}: {title}")
                     
-                    # Извлекаем и показываем прикреплённые файлы
+                    # Показываем текст ДЗ если есть полезная информация
                     hw_text = hw.get("text", "")
+                    if has_meaningful_text(hw_text):
+                        clean_text = clean_html_text(hw_text)
+                        # Ограничиваем длину текста
+                        if len(clean_text) > 200:
+                            clean_text = clean_text[:197] + "..."
+                        lines.append(f"     📝 {clean_text}")
+                    
+                    # Извлекаем и показываем прикреплённые файлы
                     files = extract_homework_files(hw_text)
                     for file_type, file_url in files:
                         if file_type == 'img':
