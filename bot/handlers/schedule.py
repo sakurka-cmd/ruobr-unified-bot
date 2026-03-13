@@ -17,7 +17,7 @@ from ..services import (
 )
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
-    format_weekday, truncate_text
+    format_weekday, truncate_text, extract_homework_files
 )
 from .balance import require_authentication
 
@@ -145,8 +145,6 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
             child_header_added = False
             
             for lesson in lessons:
-                hw_list = format_homework(lesson)
-                
                 # Фильтруем по дедлайну
                 relevant_hw = []
                 for hw in lesson.homework:
@@ -164,6 +162,15 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                 for hw in relevant_hw:
                     title = hw.get("title", "")
                     lines.append(f"  📖 {lesson.subject}: {title}")
+                    
+                    # Извлекаем и показываем прикреплённые файлы
+                    hw_text = hw.get("text", "")
+                    files = extract_homework_files(hw_text)
+                    for file_type, file_url in files:
+                        if file_type == 'img':
+                            lines.append(f"     🖼 <a href=\"{file_url}\">Изображение</a>")
+                        else:
+                            lines.append(f"     📎 <a href=\"{file_url}\">Файл</a>")
         
         if not found:
             await status_msg.edit_text("ℹ️ На завтра домашнее задание не найдено.")

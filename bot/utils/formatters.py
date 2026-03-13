@@ -1,8 +1,9 @@
 """
 Утилиты для форматирования вывода.
 """
+import re
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..services.ruobr_client import Child, FoodInfo, Lesson
 
@@ -217,3 +218,37 @@ def format_weekday(dt: date) -> str:
         "пятница", "суббота", "воскресенье"
     ]
     return weekdays[dt.weekday()]
+
+
+def extract_homework_files(text: str) -> List[Tuple[str, str]]:
+    """
+    Извлечение ссылок на файлы из HTML-текста ДЗ.
+    
+    Args:
+        text: HTML-текст с ДЗ.
+        
+    Returns:
+        Список кортежей (тип_файла, url).
+    """
+    if not text:
+        return []
+    
+    files = []
+    
+    # Извлекаем ссылки на документы (<a href="...">)
+    doc_pattern = r'<a[^>]+href=["\']([^"\']+\.(doc|docx|pdf|xls|xlsx|ppt|pptx|txt))["\']'
+    for match in re.finditer(doc_pattern, text, re.IGNORECASE):
+        url = match.group(1)
+        if url.startswith('//'):
+            url = 'https:' + url
+        files.append(('doc', url))
+    
+    # Извлекаем ссылки на изображения (<img src="...">)
+    img_pattern = r'<img[^>]+src=["\']([^"\']+\.(jpg|jpeg|png|gif|webp))["\']'
+    for match in re.finditer(img_pattern, text, re.IGNORECASE):
+        url = match.group(1)
+        if url.startswith('//'):
+            url = 'https:' + url
+        files.append(('img', url))
+    
+    return files
