@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Dict, List, Set
+from typing import Dict, List
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
@@ -197,19 +197,16 @@ class NotificationService:
                             "question_id": mark.get("question_id")
                         })
             
-            new_keys: Set[str] = set()
+            # Проверяем новые оценки через БД дедупликацию
+            new_marks = []
             for m in all_marks:
-                key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
-                new_keys.add(key)
-            
-            prev_keys = self._prev_marks.get(user.chat_id)
-            self._prev_marks[user.chat_id] = new_keys
-            
-            if prev_keys is None:
-                return
-            
-            new_marks = [m for m in all_marks 
-                        if f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}" not in prev_keys]
+                # Уникальный ключ оценки
+                notif_key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
+                
+                # Проверяем, было ли уже отправлено уведомление
+                if not await is_notification_sent(user.chat_id, "mark", notif_key):
+                    new_marks.append(m)
+                    await mark_notification_sent(user.chat_id, "mark", notif_key)
             
             if new_marks:
                 lines = ["⭐ <b>Новые оценки!</b>\n"]
