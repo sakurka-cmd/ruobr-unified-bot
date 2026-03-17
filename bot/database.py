@@ -313,7 +313,7 @@ async def get_all_enabled_users() -> List[UserConfig]:
     """Получение всех пользователей с включёнными уведомлениями."""
     async with db_pool.connection() as conn:
         async with conn.execute(
-            "SELECT * FROM users WHERE enabled = 1 OR marks_enabled = 1"
+            "SELECT * FROM users WHERE enabled = 1 OR marks_enabled = 1 OR food_enabled = 1"
         ) as cursor:
             rows = await cursor.fetchall()
             return [

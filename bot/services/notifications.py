@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Dict, List
+from typing import Dict, List, Set
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
@@ -239,22 +239,36 @@ class NotificationService:
             
             food_info = await get_food_for_children(user.login, user.password, children)
             
+            logger.debug(f"Food check for user {user.chat_id}: food_info keys={list(food_info.keys())}")
+            
             alerts = []
             new_visits: Set[str] = set()
             
             for child in children:
                 info = food_info.get(child.id)
-                if not info or not info.visits:
+                if not info:
+                    logger.debug(f"No food info for child {child.id}")
                     continue
+                    
+                if not info.visits:
+                    logger.debug(f"No visits for child {child.id}")
+                    continue
+                
+                logger.debug(f"Child {child.id} has {len(info.visits)} visits")
                 
                 for visit in info.visits:
                     visit_date = visit.get("date", "")
+                    logger.debug(f"Visit date={visit_date}, today={today_str}")
                     
                     if visit_date != today_str:
                         continue
                     
                     # Проверяем подтверждённое питание
-                    if not visit.get("ordered") and visit.get("state") != 30:
+                    ordered = visit.get("ordered")
+                    state = visit.get("state")
+                    logger.debug(f"Visit ordered={ordered}, state={state}")
+                    
+                    if not ordered and state != 30:
                         continue
                     
                     # Уникальный ключ визита
