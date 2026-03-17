@@ -50,6 +50,7 @@ def get_info_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="👥 Одноклассники"), KeyboardButton(text="👩‍🏫 Учителя")],
             [KeyboardButton(text="🏆 Достижения")],
+            [KeyboardButton(text="📋 Справка")],
             [KeyboardButton(text="◀️ Назад")],
         ],
         resize_keyboard=True
@@ -277,11 +278,40 @@ async def show_classmates(message: Message, login: str, password: str, child_ind
             await status_msg.edit_text("ℹ️ Одноклассники не найдены.")
             return
         
+        # Получаем информацию о текущем ребенке для добавления в список
+        children = await get_children_async(login, password)
+        current_child = children[child_index] if children and child_index < len(children) else None
+        
+        # Если ребёнка нет в списке одноклассников, добавляем его
+        if current_child:
+            # Разбираем имя ребенка (формат: "Фамилия Имя Отчество")
+            name_parts = current_child.full_name.split()
+            child_as_classmate = type('Classmate', (), {
+                'last_name': name_parts[0] if len(name_parts) > 0 else '',
+                'first_name': name_parts[1] if len(name_parts) > 1 else '',
+                'middle_name': name_parts[2] if len(name_parts) > 2 else '',
+                'birth_date': '',  # Дата рождения неизвестна
+                'gender': 1,  # По умолчанию
+                'full_name': current_child.full_name,
+                'gender_icon': '👤'  # Свой ребенок
+            })()
+            
+            # Проверяем, есть ли уже ребенок в списке
+            child_in_list = any(c.last_name == child_as_classmate.last_name and 
+                                c.first_name == child_as_classmate.first_name 
+                                for c in classmates)
+            if not child_in_list:
+                classmates.append(child_as_classmate)
+        
         classmates_sorted = sorted(classmates, key=lambda c: c.last_name)
         
-        lines = [f"👥 <b>Одноклассники</b> — {child_name} ({len(classmates)} чел.):\n"]
-        
         from datetime import datetime
+        
+        # Формируем таблицу
+        lines = [f"👥 <b>Классный список</b> — {child_name} ({len(classmates_sorted)} чел.):\n"]
+        lines.append("<pre>№   Фамилия Имя           | Д.р.      | Возр")
+        lines.append("─" * 42)
+        
         for i, c in enumerate(classmates_sorted, 1):
             if c.birth_date:
                 try:
@@ -294,10 +324,18 @@ async def show_classmates(message: Message, login: str, password: str, child_ind
                     bd_str = c.birth_date
                     age = "?"
             else:
-                bd_str = "?"
-                age = "?"
+                bd_str = "—"
+                age = "—"
             
-            lines.append(f"{i:2}. {c.full_name} {c.gender_icon} | {bd_str} ({age} лет)")
+            # Форматируем имя (максимум 20 символов для выравнивания)
+            name_display = c.full_name[:20].ljust(20)
+            icon = getattr(c, 'gender_icon', '👤')
+            
+            lines.append(f"{i:2}. {name_display} {icon} | {bd_str:10} | {age}")
+        
+        lines.append("─" * 42)
+        lines.append("</pre>")
+        lines.append("👤 — ваш ребёнок")
         
         text = "\n".join(lines)
         if len(text) > 4000:
@@ -325,8 +363,8 @@ async def show_teachers(message: Message, login: str, password: str, child_index
             await status_msg.edit_text("ℹ️ Учителя не найдены.")
             return
         
+        # Фильтруем только учителей с предметами (предметники)
         subject_teachers = [t for t in guide.teachers if t.subject]
-        other_teachers = [t for t in guide.teachers if not t.subject]
         
         lines = [f"👩‍🏫 <b>Учителя</b> — {child_name}\n"]
         lines.append(f"<b>Школа:</b> {guide.name}")
@@ -337,16 +375,12 @@ async def show_teachers(message: Message, login: str, password: str, child_index
         lines.append("")
         
         if subject_teachers:
-            lines.append(f"<b>Предметники ({len(subject_teachers)}):</b>")
-            for t in sorted(subject_teachers, key=lambda x: x.name):
-                lines.append(f"  • {t.name} — {t.subject}")
-        
-        if other_teachers:
-            lines.append(f"\n<b>Другие педагоги ({len(other_teachers)}):</b>")
-            for t in sorted(other_teachers, key=lambda x: x.name)[:10]:
-                lines.append(f"  • {t.name}")
-            if len(other_teachers) > 10:
-                lines.append(f"  ... и ещё {len(other_teachers) - 10}")
+            lines.append(f"<b>Предмет — Учитель:</b>\n")
+            # Сортируем по предмету
+            for t in sorted(subject_teachers, key=lambda x: x.subject):
+                lines.append(f"• {t.subject} — {t.name}")
+        else:
+            lines.append("Предметники не найдены.")
         
         await status_msg.edit_text("\n".join(lines))
             
@@ -424,6 +458,58 @@ async def btn_achievements(message: Message, user_config: Optional[UserConfig] =
         await show_achievements(message, user_config.login, user_config.password, idx, children[idx].full_name)
 
 
+@router.message(F.text == "📋 Справка")
+async def btn_help(message: Message):
+    """Справка о боте и его командах"""
+    help_text = (
+        "📋 <b>Справка по боту</b>\n\n"
+        "<b>Школьный бот</b> — помогает родителям следить за учёбой детей.\n\n"
+        
+        "<b>📅 Расписание:</b>\n"
+        "• «Расписание сегодня» — уроки на сегодня\n"
+        "• «Расписание завтра» — уроки на завтра\n\n"
+        
+        "<b>📘 Домашние задания:</b>\n"
+        "• «ДЗ на завтра» — задания на завтрашний день\n\n"
+        
+        "<b>⭐ Оценки:</b>\n"
+        "• «Оценки сегодня» — оценки за сегодняшний день\n\n"
+        
+        "<b>🍽 Питание:</b>\n"
+        "• «Баланс питания» — текущий баланс счёта\n"
+        "• «Питание сегодня» — что ребёнок ел сегодня\n\n"
+        
+        "<b>ℹ️ Информация:</b>\n"
+        "• «Одноклассники» — список класса с датами рождения\n"
+        "• «Учителя» — предметники и контакты школы\n"
+        "• «Достижения» — достижения и проекты ученика\n\n"
+        
+        "<b>⚙️ Настройки:</b>\n"
+        "• «Изменить логин/пароль» — обновить данные\n"
+        "• «Порог баланса» — настроить уведомления о балансе\n"
+        "• «Уведомления» — включить/выключить оповещения\n"
+        "• «Мой профиль» — информация об аккаунте\n\n"
+        
+        "<b>📝 Команды:</b>\n"
+        "/start — главное меню\n"
+        "/set_login — настроить учётные данные\n"
+        "/balance — баланс питания\n"
+        "/ttoday — расписание сегодня\n"
+        "/ttomorrow — расписание завтра\n"
+        "/enable — включить уведомления\n"
+        "/disable — выключить уведомления\n\n"
+        
+        "<b>💡 Подсказка:</b> Бот автоматически уведомляет о:\n"
+        "• Низком балансе питания\n"
+        "• Новых оценках\n\n"
+        
+        "<b>🔗 Полезные ссылки:</b>\n"
+        "• cabinet.ruobr.ru — электронный дневник\n"
+        "• github.com/sakurka-cmd/ruobr-telegram-bot — исходный код"
+    )
+    await message.answer(help_text)
+
+
 # Callback handlers для выбора ребенка
 @router.callback_query(F.data.startswith("info_classmates_"))
 async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
@@ -461,11 +547,34 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
             await callback.message.edit_text("ℹ️ Одноклассники не найдены.")
             return
         
+        # Добавляем текущего ребенка в список, если его там нет
+        current_child = children[idx]
+        name_parts = current_child.full_name.split()
+        child_as_classmate = type('Classmate', (), {
+            'last_name': name_parts[0] if len(name_parts) > 0 else '',
+            'first_name': name_parts[1] if len(name_parts) > 1 else '',
+            'middle_name': name_parts[2] if len(name_parts) > 2 else '',
+            'birth_date': '',
+            'gender': 1,
+            'full_name': current_child.full_name,
+            'gender_icon': '👤'
+        })()
+        
+        child_in_list = any(c.last_name == child_as_classmate.last_name and 
+                            c.first_name == child_as_classmate.first_name 
+                            for c in classmates)
+        if not child_in_list:
+            classmates.append(child_as_classmate)
+        
         classmates_sorted = sorted(classmates, key=lambda c: c.last_name)
         
-        lines = [f"👥 <b>Одноклассники</b> — {children[idx].full_name} ({len(classmates)} чел.):\n"]
-        
         from datetime import datetime
+        
+        # Формируем таблицу
+        lines = [f"👥 <b>Классный список</b> — {children[idx].full_name} ({len(classmates_sorted)} чел.):\n"]
+        lines.append("<pre>№   Фамилия Имя           | Д.р.      | Возр")
+        lines.append("─" * 42)
+        
         for i, c in enumerate(classmates_sorted, 1):
             if c.birth_date:
                 try:
@@ -478,10 +587,17 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
                     bd_str = c.birth_date
                     age = "?"
             else:
-                bd_str = "?"
-                age = "?"
+                bd_str = "—"
+                age = "—"
             
-            lines.append(f"{i:2}. {c.full_name} {c.gender_icon} | {bd_str} ({age} лет)")
+            name_display = c.full_name[:20].ljust(20)
+            icon = getattr(c, 'gender_icon', '👤')
+            
+            lines.append(f"{i:2}. {name_display} {icon} | {bd_str:10} | {age}")
+        
+        lines.append("─" * 42)
+        lines.append("</pre>")
+        lines.append("👤 — ваш ребёнок")
         
         text = "\n".join(lines)
         if len(text) > 4000:
@@ -529,8 +645,8 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
             await callback.message.edit_text("ℹ️ Учителя не найдены.")
             return
         
+        # Фильтруем только учителей с предметами (предметники)
         subject_teachers = [t for t in guide.teachers if t.subject]
-        other_teachers = [t for t in guide.teachers if not t.subject]
         
         lines = [f"👩‍🏫 <b>Учителя</b> — {children[idx].full_name}\n"]
         lines.append(f"<b>Школа:</b> {guide.name}")
@@ -541,16 +657,12 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
         lines.append("")
         
         if subject_teachers:
-            lines.append(f"<b>Предметники ({len(subject_teachers)}):</b>")
-            for t in sorted(subject_teachers, key=lambda x: x.name):
-                lines.append(f"  • {t.name} — {t.subject}")
-        
-        if other_teachers:
-            lines.append(f"\n<b>Другие педагоги ({len(other_teachers)}):</b>")
-            for t in sorted(other_teachers, key=lambda x: x.name)[:10]:
-                lines.append(f"  • {t.name}")
-            if len(other_teachers) > 10:
-                lines.append(f"  ... и ещё {len(other_teachers) - 10}")
+            lines.append(f"<b>Предмет — Учитель:</b>\n")
+            # Сортируем по предмету
+            for t in sorted(subject_teachers, key=lambda x: x.subject):
+                lines.append(f"• {t.subject} — {t.name}")
+        else:
+            lines.append("Предметники не найдены.")
         
         await callback.message.edit_text("\n".join(lines))
         
