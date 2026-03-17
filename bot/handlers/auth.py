@@ -372,14 +372,22 @@ async def show_teachers(message: Message, login: str, password: str, child_index
         lines.append("")
         
         if subject_teachers:
+            # Разбиваем учителей с несколькими предметами на отдельные записи
+            teacher_subject_pairs = []
+            for t in subject_teachers:
+                # Разбиваем строку предметов по запятой
+                subjects = [s.strip() for s in t.subject.split(",") if s.strip()]
+                for subject in subjects:
+                    teacher_subject_pairs.append((subject, t.name))
+            
             # Сортируем по предмету
-            subject_teachers_sorted = sorted(subject_teachers, key=lambda x: x.subject)
+            teacher_subject_pairs.sort(key=lambda x: x[0])
             
             lines.append("<pre>Предмет                    | Учитель")
             lines.append("─" * 50)
-            for t in subject_teachers_sorted:
-                subject = t.subject[:25].ljust(25)
-                lines.append(f"{subject} | {t.name}")
+            for subject, name in teacher_subject_pairs:
+                subject_display = subject[:25].ljust(25)
+                lines.append(f"{subject_display} | {name}")
             lines.append("─" * 50)
             lines.append("</pre>")
         else:
@@ -657,14 +665,22 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
         lines.append("")
         
         if subject_teachers:
+            # Разбиваем учителей с несколькими предметами на отдельные записи
+            teacher_subject_pairs = []
+            for t in subject_teachers:
+                # Разбиваем строку предметов по запятой
+                subjects = [s.strip() for s in t.subject.split(",") if s.strip()]
+                for subject in subjects:
+                    teacher_subject_pairs.append((subject, t.name))
+            
             # Сортируем по предмету
-            subject_teachers_sorted = sorted(subject_teachers, key=lambda x: x.subject)
+            teacher_subject_pairs.sort(key=lambda x: x[0])
             
             lines.append("<pre>Предмет                    | Учитель")
             lines.append("─" * 50)
-            for t in subject_teachers_sorted:
-                subject = t.subject[:25].ljust(25)
-                lines.append(f"{subject} | {t.name}")
+            for subject, name in teacher_subject_pairs:
+                subject_display = subject[:25].ljust(25)
+                lines.append(f"{subject_display} | {name}")
             lines.append("─" * 50)
             lines.append("</pre>")
         else:
