@@ -18,6 +18,7 @@ import signal
 import sys
 from pathlib import Path
 
+import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -45,6 +46,24 @@ from bot.services.notifications import NotificationService
 from bot.services.cache import periodic_cache_cleanup
 
 
+def create_proxied_session(proxy_url: str):
+    """Создает сессию с прокси для aiogram 3.x"""
+    import aiohttp
+    from aiohttp_socks import ProxyConnector
+    from aiogram.client.session.aiohttp import AiohttpSession
+    
+    class ProxiedSession(AiohttpSession):
+        def __init__(self, proxy_url: str):
+            super().__init__()
+            self._proxy_url = proxy_url
+        
+        def _create_session(self) -> aiohttp.ClientSession:
+            connector = ProxyConnector.from_url(self._proxy_url)
+            return aiohttp.ClientSession(connector=connector)
+    
+    return ProxiedSession(proxy_url)
+
+
 # Настройка логирования
 def setup_logging() -> None:
     """Настройка системы логирования."""
@@ -60,7 +79,7 @@ def setup_logging() -> None:
         ]
     )
     
-    # Уменьшаем уровень логирования для aiogram (но оставляем INFO для отладки)
+    # Уменьшаем уровень логирования для aiogram
     logging.getLogger("aiogram").setLevel(logging.INFO)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
@@ -83,9 +102,7 @@ async def main() -> None:
     
     if proxy_url and SOCKS_SUPPORT:
         logger.info(f"Using proxy: {proxy_url[:30]}...")
-        connector = ProxyConnector.from_url(proxy_url)
-        from aiogram.client.session.aiohttp import AiohttpSession
-        session = AiohttpSession(connector=connector)
+        session = create_proxied_session(proxy_url)
         bot = Bot(
             token=config.bot_token,
             session=session,
@@ -103,7 +120,7 @@ async def main() -> None:
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
         )
     
-    # Используем MemoryStorage для FSM (можно заменить на RedisStorage)
+    # Используем MemoryStorage для FSM
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
     
@@ -128,7 +145,7 @@ async def main() -> None:
     # Сервис уведомлений
     notification_service = NotificationService(bot)
     
-    # Удаляем вебхук если был установлен (обязательно для polling!)
+    # Удаляем вебхук если был установлен
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Webhook deleted, starting polling...")
     
@@ -152,19 +169,15 @@ async def main() -> None:
         try:
             loop.add_signal_handler(sig, signal_handler)
         except NotImplementedError:
-            # Windows не поддерживает add_signal_handler
             pass
     
     try:
-        # Запуск polling (обрабатываем сообщения и callback queries)
         await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
     except asyncio.CancelledError:
         logger.info("Polling cancelled")
     finally:
-        # Очистка ресурсов
         logger.info("Shutting down...")
         
-        # Отмена фоновых задач
         notification_task.cancel()
         cache_cleanup_task.cancel()
         
@@ -178,10 +191,7 @@ async def main() -> None:
         except asyncio.CancelledError:
             pass
         
-        # Закрытие базы данных
         await db_pool.close()
-        
-        # Закрытие сессии бота
         await bot.session.close()
         
         logger.info("Bot stopped")
