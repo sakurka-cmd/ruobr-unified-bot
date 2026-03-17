@@ -428,43 +428,195 @@ async def btn_achievements(message: Message, user_config: Optional[UserConfig] =
 @router.callback_query(F.data.startswith("info_classmates_"))
 async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
     if user_config is None or not user_config.login:
-        await callback.answer("❌ Ошибка авторизации")
+        await callback.answer("❌ Ошибка авторизации", show_alert=True)
         return
     
-    idx = int(callback.data.split("_")[-1])
-    children = await get_children_async(user_config.login, user_config.password)
-    
-    await callback.message.delete()
-    await show_classmates(callback.message, user_config.login, user_config.password, idx, children[idx].full_name)
+    # Отвечаем сразу, чтобы callback не истёк
     await callback.answer()
+    
+    try:
+        idx = int(callback.data.split("_")[-1])
+        
+        # Показываем loading
+        await callback.message.edit_text("🔄 Загрузка одноклассников...")
+        
+        children = await get_children_async(user_config.login, user_config.password)
+        
+        if not children or idx >= len(children):
+            await callback.message.edit_text("❌ Ошибка: ребёнок не найден")
+            return
+        
+        # Получаем одноклассников с таймаутом
+        import asyncio
+        try:
+            classmates = await asyncio.wait_for(
+                get_classmates_for_child(user_config.login, user_config.password, idx),
+                timeout=25
+            )
+        except asyncio.TimeoutError:
+            await callback.message.edit_text("⏱ Превышено время ожидания. Попробуйте позже.")
+            return
+        
+        if not classmates:
+            await callback.message.edit_text("ℹ️ Одноклассники не найдены.")
+            return
+        
+        classmates_sorted = sorted(classmates, key=lambda c: c.last_name)
+        
+        lines = [f"👥 <b>Одноклассники</b> — {children[idx].full_name} ({len(classmates)} чел.):\n"]
+        
+        from datetime import datetime
+        for i, c in enumerate(classmates_sorted, 1):
+            if c.birth_date:
+                try:
+                    bd = datetime.strptime(c.birth_date, "%Y-%m-%d")
+                    bd_str = bd.strftime("%d.%m.%Y")
+                    age = datetime.now().year - bd.year
+                    if (datetime.now().month, datetime.now().day) < (bd.month, bd.day):
+                        age -= 1
+                except:
+                    bd_str = c.birth_date
+                    age = "?"
+            else:
+                bd_str = "?"
+                age = "?"
+            
+            lines.append(f"{i:2}. {c.full_name} {c.gender_icon} | {bd_str} ({age} лет)")
+        
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+        
+        await callback.message.edit_text(text)
+        
+    except Exception as e:
+        logger.error(f"Error in cb_classmates_select: {e}")
+        try:
+            await callback.message.edit_text(f"❌ Ошибка: {e}")
+        except:
+            pass
 
 
 @router.callback_query(F.data.startswith("info_teachers_"))
 async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
     if user_config is None or not user_config.login:
-        await callback.answer("❌ Ошибка авторизации")
+        await callback.answer("❌ Ошибка авторизации", show_alert=True)
         return
     
-    idx = int(callback.data.split("_")[-1])
-    children = await get_children_async(user_config.login, user_config.password)
-    
-    await callback.message.delete()
-    await show_teachers(callback.message, user_config.login, user_config.password, idx, children[idx].full_name)
     await callback.answer()
+    
+    try:
+        idx = int(callback.data.split("_")[-1])
+        await callback.message.edit_text("🔄 Загрузка учителей...")
+        
+        children = await get_children_async(user_config.login, user_config.password)
+        
+        if not children or idx >= len(children):
+            await callback.message.edit_text("❌ Ошибка: ребёнок не найден")
+            return
+        
+        import asyncio
+        try:
+            guide = await asyncio.wait_for(
+                get_guide_for_child(user_config.login, user_config.password, idx),
+                timeout=25
+            )
+        except asyncio.TimeoutError:
+            await callback.message.edit_text("⏱ Превышено время ожидания. Попробуйте позже.")
+            return
+        
+        if not guide.teachers:
+            await callback.message.edit_text("ℹ️ Учителя не найдены.")
+            return
+        
+        subject_teachers = [t for t in guide.teachers if t.subject]
+        other_teachers = [t for t in guide.teachers if not t.subject]
+        
+        lines = [f"👩‍🏫 <b>Учителя</b> — {children[idx].full_name}\n"]
+        lines.append(f"<b>Школа:</b> {guide.name}")
+        if guide.phone:
+            lines.append(f"<b>Телефон:</b> {guide.phone}")
+        if guide.url:
+            lines.append(f"<b>Сайт:</b> {guide.url}")
+        lines.append("")
+        
+        if subject_teachers:
+            lines.append(f"<b>Предметники ({len(subject_teachers)}):</b>")
+            for t in sorted(subject_teachers, key=lambda x: x.name):
+                lines.append(f"  • {t.name} — {t.subject}")
+        
+        if other_teachers:
+            lines.append(f"\n<b>Другие педагоги ({len(other_teachers)}):</b>")
+            for t in sorted(other_teachers, key=lambda x: x.name)[:10]:
+                lines.append(f"  • {t.name}")
+            if len(other_teachers) > 10:
+                lines.append(f"  ... и ещё {len(other_teachers) - 10}")
+        
+        await callback.message.edit_text("\n".join(lines))
+        
+    except Exception as e:
+        logger.error(f"Error in cb_teachers_select: {e}")
+        try:
+            await callback.message.edit_text(f"❌ Ошибка: {e}")
+        except:
+            pass
 
 
 @router.callback_query(F.data.startswith("info_achievements_"))
 async def cb_achievements_select(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
     if user_config is None or not user_config.login:
-        await callback.answer("❌ Ошибка авторизации")
+        await callback.answer("❌ Ошибка авторизации", show_alert=True)
         return
     
-    idx = int(callback.data.split("_")[-1])
-    children = await get_children_async(user_config.login, user_config.password)
-    
-    await callback.message.delete()
-    await show_achievements(callback.message, user_config.login, user_config.password, idx, children[idx].full_name)
     await callback.answer()
+    
+    try:
+        idx = int(callback.data.split("_")[-1])
+        await callback.message.edit_text("🔄 Загрузка достижений...")
+        
+        children = await get_children_async(user_config.login, user_config.password)
+        
+        if not children or idx >= len(children):
+            await callback.message.edit_text("❌ Ошибка: ребёнок не найден")
+            return
+        
+        import asyncio
+        try:
+            achievements = await asyncio.wait_for(
+                get_achievements_for_child(user_config.login, user_config.password, idx),
+                timeout=25
+            )
+        except asyncio.TimeoutError:
+            await callback.message.edit_text("⏱ Превышено время ожидания. Попробуйте позже.")
+            return
+        
+        lines = [f"🏆 <b>Достижения</b> — {children[idx].full_name}\n"]
+        
+        if achievements.directions:
+            total = sum(d.count for d in achievements.directions)
+            lines.append(f"<b>Всего:</b> {total}\n")
+            
+            for d in achievements.directions:
+                bar = "█" * (d.percent // 10) + "░" * (10 - d.percent // 10)
+                lines.append(f"📍 {d.direction}")
+                lines.append(f"   {bar} {d.count} ({d.percent}%)")
+        else:
+            lines.append("Достижений пока нет.")
+        
+        if achievements.projects:
+            lines.append(f"\n📝 <b>Проекты:</b> {len(achievements.projects)}")
+        
+        if achievements.gto_id:
+            lines.append(f"\n🏃 <b>ГТО ID:</b> {achievements.gto_id}")
+        
+        await callback.message.edit_text("\n".join(lines))
+        
+    except Exception as e:
+        logger.error(f"Error in cb_achievements_select: {e}")
+        try:
+            await callback.message.edit_text(f"❌ Ошибка: {e}")
+        except:
+            pass
 
 
 @router.message(F.text == "◀️ Назад")

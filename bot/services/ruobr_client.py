@@ -231,6 +231,7 @@ class RuobrClient:
     """
     
     BASE_URL = "https://cabinet.ruobr.ru"
+    API_TIMEOUT = 30  # Таймаут API запросов в секундах
     
     def __init__(
         self,
@@ -290,14 +291,23 @@ class RuobrClient:
         
         for attempt in range(self._max_retries):
             try:
-                # Используем синхронную библиотеку через to_thread
-                result = await asyncio.to_thread(
-                    self._sync_request,
-                    method,
-                    endpoint,
-                    **kwargs
+                # Используем синхронную библиотеку через to_thread с таймаутом
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._sync_request,
+                        method,
+                        endpoint,
+                        **kwargs
+                    ),
+                    timeout=self.API_TIMEOUT
                 )
                 return result
+            except asyncio.TimeoutError:
+                last_error = NetworkError(f"Request timeout after {self.API_TIMEOUT}s")
+                logger.warning(f"Request timeout (attempt {attempt + 1}/{self._max_retries})")
+                if attempt < self._max_retries - 1:
+                    delay = self._retry_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
             except AuthenticationError:
                 raise  # Не повторяем при ошибке аутентификации
             except (NetworkError, ClientError) as e:
