@@ -307,8 +307,8 @@ async def show_classmates(message: Message, login: str, password: str, child_ind
         
         # Формируем таблицу с увеличенной шириной для ФИО
         lines = [f"👥 <b>Классный список</b> — {child_name} ({len(classmates_sorted)} чел.):\n"]
-        lines.append("<pre>№   Фамилия Имя Отчество          | Д.р.      | Возр")
-        lines.append("─" * 52)
+        lines.append("<pre>№   Фамилия Имя Отчество                    | Д.р.      | Возр")
+        lines.append("─" * 62)
         
         for i, c in enumerate(classmates_sorted, 1):
             if c.birth_date:
@@ -325,13 +325,13 @@ async def show_classmates(message: Message, login: str, password: str, child_ind
                 bd_str = "—"
                 age = "—"
             
-            # Форматируем имя (30 символов для полного ФИО)
-            name_display = c.full_name[:30].ljust(30)
+            # Форматируем имя (40 символов для полного ФИО)
+            name_display = c.full_name[:40].ljust(40)
             icon = c.gender_icon
             
             lines.append(f"{i:2}. {name_display} {icon} | {bd_str:10} | {age}")
         
-        lines.append("─" * 52)
+        lines.append("─" * 62)
         lines.append("</pre>")
         
         text = "\n".join(lines)
@@ -372,10 +372,16 @@ async def show_teachers(message: Message, login: str, password: str, child_index
         lines.append("")
         
         if subject_teachers:
-            lines.append(f"<b>Предмет — Учитель:</b>\n")
             # Сортируем по предмету
-            for t in sorted(subject_teachers, key=lambda x: x.subject):
-                lines.append(f"• {t.subject} — {t.name}")
+            subject_teachers_sorted = sorted(subject_teachers, key=lambda x: x.subject)
+            
+            lines.append("<pre>Предмет                    | Учитель")
+            lines.append("─" * 50)
+            for t in subject_teachers_sorted:
+                subject = t.subject[:25].ljust(25)
+                lines.append(f"{subject} | {t.name}")
+            lines.append("─" * 50)
+            lines.append("</pre>")
         else:
             lines.append("Предметники не найдены.")
         
@@ -568,8 +574,8 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
         
         # Формируем таблицу с увеличенной шириной для ФИО
         lines = [f"👥 <b>Классный список</b> — {children[idx].full_name} ({len(classmates_sorted)} чел.):\n"]
-        lines.append("<pre>№   Фамилия Имя Отчество          | Д.р.      | Возр")
-        lines.append("─" * 52)
+        lines.append("<pre>№   Фамилия Имя Отчество                    | Д.р.      | Возр")
+        lines.append("─" * 62)
         
         for i, c in enumerate(classmates_sorted, 1):
             if c.birth_date:
@@ -586,12 +592,12 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
                 bd_str = "—"
                 age = "—"
             
-            name_display = c.full_name[:30].ljust(30)
+            name_display = c.full_name[:40].ljust(40)
             icon = c.gender_icon
             
             lines.append(f"{i:2}. {name_display} {icon} | {bd_str:10} | {age}")
         
-        lines.append("─" * 52)
+        lines.append("─" * 62)
         lines.append("</pre>")
         
         text = "\n".join(lines)
@@ -652,10 +658,16 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
         lines.append("")
         
         if subject_teachers:
-            lines.append(f"<b>Предмет — Учитель:</b>\n")
             # Сортируем по предмету
-            for t in sorted(subject_teachers, key=lambda x: x.subject):
-                lines.append(f"• {t.subject} — {t.name}")
+            subject_teachers_sorted = sorted(subject_teachers, key=lambda x: x.subject)
+            
+            lines.append("<pre>Предмет                    | Учитель")
+            lines.append("─" * 50)
+            for t in subject_teachers_sorted:
+                subject = t.subject[:25].ljust(25)
+                lines.append(f"{subject} | {t.name}")
+            lines.append("─" * 50)
+            lines.append("</pre>")
         else:
             lines.append("Предметники не найдены.")
         
