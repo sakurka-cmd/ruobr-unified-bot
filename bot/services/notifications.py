@@ -239,7 +239,7 @@ class NotificationService:
             
             food_info = await get_food_for_children(user.login, user.password, children)
             
-            logger.debug(f"Food check for user {user.chat_id}: food_info keys={list(food_info.keys())}")
+            logger.info(f"Food check for user {user.chat_id}: food_info keys={list(food_info.keys())}")
             
             alerts = []
             new_visits: Set[str] = set()
@@ -247,18 +247,18 @@ class NotificationService:
             for child in children:
                 info = food_info.get(child.id)
                 if not info:
-                    logger.debug(f"No food info for child {child.id}")
+                    logger.info(f"No food info for child {child.id}")
                     continue
                     
                 if not info.visits:
-                    logger.debug(f"No visits for child {child.id}")
+                    logger.info(f"No visits for child {child.id}")
                     continue
                 
-                logger.debug(f"Child {child.id} has {len(info.visits)} visits")
+                logger.info(f"Child {child.id} has {len(info.visits)} visits")
                 
                 for visit in info.visits:
                     visit_date = visit.get("date", "")
-                    logger.debug(f"Visit date={visit_date}, today={today_str}")
+                    logger.info(f"Visit date={visit_date}, today={today_str}")
                     
                     if visit_date != today_str:
                         continue
@@ -266,7 +266,7 @@ class NotificationService:
                     # Проверяем подтверждённое питание
                     ordered = visit.get("ordered")
                     state = visit.get("state")
-                    logger.debug(f"Visit ordered={ordered}, state={state}")
+                    logger.info(f"Visit ordered={ordered}, state={state}")
                     
                     if not ordered and state != 30:
                         continue
