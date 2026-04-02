@@ -122,15 +122,16 @@ def parse_complex_menu(qs_units: Any) -> List[str]:
     Парсинг комплексного меню из qs_unit.
     
     API возвращает комплексное питание как одну строку в qs_unit[0].about:
-    "Рис отварной 150 Тефтели (1 вариант) соус том. 60/30 Хлеб ржаной 20 Компот 200"
+    "Рис отварной 150 Тефтели (1 вариант) соус том. (свинина)60/30 Хлеб ржаной 20"
     
     Формат: "Название Вес" или "Название Вес1/Вес2", разделены пробелами.
+    Числа внутри скобок (как "(1 вариант)") — это не веса, а часть названия.
     
     Args:
         qs_units: Список qs_unit из API.
         
     Returns:
-        Список строк с блюдами и граммовками.
+        Список строк с блюдами.
     """
     if not qs_units or not isinstance(qs_units, list) or len(qs_units) == 0:
         return []
@@ -143,27 +144,30 @@ def parse_complex_menu(qs_units: Any) -> List[str]:
     if not about or not about.strip():
         return []
     
-    # Разбиваем строку на отдельные блюда по паттерну:
-    # Каждый элемент: "Название" + число (граммовка)
-    # Пример: "Рис отварной 150" "Тефтели соус том. 60/30" "Хлеб ржаной 20"
     import re
     
-    dishes = []
-    # Паттерн: текст до числа с весом
-    # Числа могут быть в формате "150" или "60/30" или "200/7"
-    # Используем lookahead: текст + пробел + цифры (вес)
-    parts = re.split(r'\s+(?=\d[\d/]*(?:\s|$))', about.strip())
+    # Способ 1: В qs_unit может быть список блюд (иногда API возвращает структурированные данные)
+    if len(qs_units) > 1:
+        names = []
+        for u in qs_units:
+            name = u.get("name", "") or u.get("title", "") or u.get("text", "")
+            if name.strip():
+                names.append(name.strip())
+        if names:
+            return names
     
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        
-        # Убираем вес из конца (числа типа 150, 60/30, 200/7)
-        part = re.sub(r'\s+\d[\d/]*$', '', part)
-        
-        if part.strip():
-            dishes.append(part.strip())
+    # Способ 2: Парсим плоскую строку
+    # Разбиваем по весам: 2-3 цифры (опционально /1-2 цифры),
+    # которые НЕ стоят сразу после "(" (чтобы не ломаться на "(1 вариант)")
+    parts = re.split(r'(?<!\()\s*(\d{2,3}(?:/\d{1,2})?)\s*', about.strip())
+    
+    dishes = []
+    for i in range(0, len(parts), 2):
+        name = parts[i].strip()
+        # Убираем висящие скобки в начале/конце
+        name = name.strip(' ,.')
+        if name:
+            dishes.append(name)
     
     return dishes
 
