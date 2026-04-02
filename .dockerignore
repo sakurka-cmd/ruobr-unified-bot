@@ -1,11 +1,6 @@
-venv/
-.venv/
-__pycache__/
-*.py[cod]
-.git/
-.gitignore
-*.md
-.env.example
-*.log
-*.db
+.env
 data/
+__pycache__/
+*.pyc
+.git/
+*.md
