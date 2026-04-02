@@ -93,11 +93,56 @@ class FoodInfo:
         except ValueError:
             balance = 0.0
         
+        # Извлекаем визиты из различных возможных ключей
+        # API может возвращать данные под разными именами
+        visits: List[Dict[str, Any]] = []
+        
+        # Приоритетный порядок проверки ключей
+        visit_keys = ["vizit", "visit", "visits", "orders", "items"]
+        for key in visit_keys:
+            val = data.get(key)
+            if val and isinstance(val, list) and len(val) > 0:
+                visits = val
+                logger.info(f"FoodInfo: found visits under key '{key}' ({len(visits)} items)")
+                break
+        
+        # Если не нашли по известным ключам — ищем любой список со словарями,
+        # содержащими поля характерные для визитов питания
+        if not visits:
+            visit_like_keys = {"date", "ordered", "state", "dishes", "price_sum", "price", "line_name"}
+            for key, value in data.items():
+                if key in ("balance", "balance_str"):
+                    continue
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    first_keys = set(value[0].keys())
+                    if first_keys & visit_like_keys:
+                        visits = value
+                        logger.info(f"FoodInfo: auto-detected visits under key '{key}' ({len(visits)} items), fields: {list(first_keys)}")
+                        break
+        
+        if not visits:
+            # Логируем структуру данных для отладки
+            logger.warning(
+                f"FoodInfo: no visits found in food data for child {child_id}. "
+                f"Available keys: {list(data.keys())}"
+            )
+            for key, value in data.items():
+                if isinstance(value, list):
+                    sample = value[0] if value else None
+                    if isinstance(sample, dict):
+                        logger.info(f"  {key}: list[{len(value)}], first item keys: {list(sample.keys())}")
+                    else:
+                        logger.info(f"  {key}: list[{len(value)}], item type: {type(sample).__name__}")
+                elif isinstance(value, dict):
+                    logger.info(f"  {key}: dict, keys: {list(value.keys())[:10]}")
+                else:
+                    logger.info(f"  {key}: {type(value).__name__} = {str(value)[:200]}")
+        
         return cls(
             child_id=child_id,
             balance=balance,
             has_food=bool(data.get("balance")),
-            visits=data.get("vizit", []) or []
+            visits=visits
         )
 
 
@@ -401,17 +446,20 @@ class RuobrClient:
         
         return [Child.from_dict(child) for child in result]
     
-    async def get_food_info(self) -> FoodInfo:
+    async def get_food_info(self, child_id: Optional[int] = None) -> FoodInfo:
         """
         Получение информации о питании для текущего ребёнка.
+        
+        Args:
+            child_id: Реальный ID ребёнка из API. Если не указан, используется индекс.
         
         Returns:
             Объект FoodInfo.
         """
         result = await self._request_with_retry("GET", "food")
         
-        # child_id будет установлен из контекста
-        return FoodInfo.from_dict(self._child_index, result if isinstance(result, dict) else {})
+        effective_id = child_id if child_id is not None else self._child_index
+        return FoodInfo.from_dict(effective_id, result if isinstance(result, dict) else {})
     
     async def get_timetable(
         self,
@@ -509,7 +557,7 @@ async def get_food_for_children(
     async def fetch_food(child: Child, index: int) -> tuple:
         async with RuobrClient(login, password) as client:
             client.set_child(index)
-            food = await client.get_food_info()
+            food = await client.get_food_info(child_id=child.id)
             return child.id, food
     
     tasks = [fetch_food(child, idx) for idx, child in enumerate(children)]

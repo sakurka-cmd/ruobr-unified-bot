@@ -3,8 +3,8 @@
 """
 import asyncio
 import logging
-from datetime import date, timedelta
-from typing import Dict, List
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
@@ -27,6 +27,133 @@ from ..services import (
 from ..utils.formatters import truncate_text
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_date(date_str: str) -> str:
+    """
+    Нормализация строки даты в формат YYYY-MM-DD.
+    Поддерживает: YYYY-MM-DD, DD.MM.YYYY, DD/MM/YYYY, YYYY/MM/DD,
+    ISO datetime (YYYY-MM-DDTHH:MM:SS), Unix timestamp.
+    
+    Args:
+        date_str: Исходная строка даты.
+        
+    Returns:
+        Дата в формате YYYY-MM-DD или исходная строка, если парсинг не удался.
+    """
+    if not date_str:
+        return ""
+    
+    date_str = str(date_str).strip()
+    
+    # Уже в формате YYYY-MM-DD (ровно 10 символов)
+    if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+        return date_str
+    
+    # ISO datetime с временем: YYYY-MM-DDTHH:MM:SS или YYYY-MM-DD HH:MM:SS
+    if len(date_str) > 10:
+        # Берём только часть до T или пробела
+        for sep in ['T', ' ']:
+            if sep in date_str:
+                date_str = date_str.split(sep)[0]
+                break
+        if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+            return date_str
+    
+    # Пробуем различные форматы
+    formats = [
+        "%d.%m.%Y",   # 02.04.2026
+        "%d/%m/%Y",   # 02/04/2026
+        "%Y/%m/%d",   # 2026/04/02
+        "%d-%m-%Y",   # 02-04-2026
+    ]
+    
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    
+    # Если ничего не подошло, возвращаем как есть (для диагностики)
+    logger.warning(f"Could not normalize date: '{date_str}'")
+    return date_str
+
+
+def extract_dish_names(dishes: Any) -> List[str]:
+    """
+    Извлечение названий блюд из различных форматов данных.
+    
+    Args:
+        dishes: Список блюд (может быть списком словарей, списком строк, или None).
+        
+    Returns:
+        Список названий блюд.
+    """
+    if not dishes:
+        return []
+    
+    if not isinstance(dishes, list):
+        return []
+    
+    names = []
+    for dish in dishes:
+        if isinstance(dish, str):
+            if dish.strip():
+                names.append(dish.strip())
+        elif isinstance(dish, dict):
+            # Пробуем разные ключи для названия блюда
+            name = (
+                dish.get("text") or
+                dish.get("name") or
+                dish.get("title") or
+                dish.get("dish_name") or
+                dish.get("description") or
+                ""
+            )
+            if name and str(name).strip():
+                names.append(str(name).strip())
+    
+    return names
+
+
+def extract_price(visit: Dict) -> float:
+    """
+    Извлечение цены из визита с поддержкой разных ключей и форматов.
+    
+    Args:
+        visit: Словарь с данными визита.
+        
+    Returns:
+        Цена в виде float (0.0 если не удалось извлечь).
+    """
+    price_candidates = [
+        visit.get("price_sum"),
+        visit.get("price"),
+        visit.get("sum"),
+        visit.get("total"),
+        visit.get("amount"),
+        visit.get("cost"),
+    ]
+    
+    for raw in price_candidates:
+        if raw is not None and str(raw).strip():
+            price_str = str(raw).strip().replace(",", ".").replace(" ", "")
+            # Убираем нечисловые символы кроме точки и минуса
+            cleaned = ""
+            for ch in price_str:
+                if ch.isdigit() or ch == '.' or ch == '-':
+                    cleaned += ch
+                elif ch and not cleaned:
+                    # Пропускаем ведущие нечисловые символы (валюту и т.д.)
+                    continue
+            if cleaned:
+                try:
+                    return float(cleaned)
+                except ValueError:
+                    continue
+    
+    return 0.0
 
 
 class NotificationService:
@@ -98,6 +225,12 @@ class NotificationService:
         
         if not children:
             return
+        
+        logger.info(
+            f"Processing user {user.chat_id}: "
+            f"balance={user.enabled}, marks={user.marks_enabled}, food={user.food_enabled}, "
+            f"children={len(children)}"
+        )
         
         # Уведомления о балансе (только когда ниже порога)
         if user.enabled:
@@ -233,10 +366,12 @@ class NotificationService:
         Проверка и отправка уведомлений о питании.
         Показывает что поел ребёнок и сколько списано.
         
-        Логика определения:
-        - ordered=1 означает что ребёнок поел
-        - state=30 означает что заказ подтверждён
-        - наличие блюд в dishes также указывает на питание
+        Логика определения приёма пищи (срабатывает при любом из условий):
+        - ordered = истинное значение (1, True, "1")
+        - state = 30 (заказ подтверждён)
+        - Есть непустой список блюд в dishes
+        - Есть цена > 0 (признак фактического списания)
+        - state_str содержит "подтвержд" (подтверждён заказ)
         """
         try:
             today = date.today()
@@ -244,82 +379,117 @@ class NotificationService:
             
             food_info = await get_food_for_children(user.login, user.password, children)
             
-            logger.info(f"Food check for user {user.chat_id}, date={today_str}")
+            logger.info(f"Food check for user {user.chat_id}, date={today_str}, children={len(children)}")
             
             alerts = []
             
             for child in children:
                 info = food_info.get(child.id)
                 if not info:
-                    logger.debug(f"No food info for child {child.id}")
+                    logger.warning(f"No food info for child {child.id} ({child.full_name})")
                     continue
                     
                 if not info.visits:
-                    logger.debug(f"No visits for child {child.id}")
+                    logger.info(
+                        f"No visits for child {child.id} ({child.full_name}), "
+                        f"balance={info.balance:.0f}"
+                    )
                     continue
                 
-                logger.debug(f"Child {child.id} has {len(info.visits)} visits")
+                logger.info(
+                    f"Child {child.id} ({child.full_name}) has {len(info.visits)} visit(s), "
+                    f"balance={info.balance:.0f}"
+                )
                 
-                for visit in info.visits:
-                    visit_date = visit.get("date", "")
-                    
-                    if visit_date != today_str:
+                for visit_idx, visit in enumerate(info.visits):
+                    if not isinstance(visit, dict):
+                        logger.warning(f"Visit #{visit_idx} is not a dict: {type(visit)}")
                         continue
                     
-                    # Проверяем подтверждённое питание
+                    # Нормализуем дату визита
+                    raw_date = visit.get("date", "")
+                    visit_date = normalize_date(raw_date)
+                    
+                    if visit_date and visit_date != today_str:
+                        logger.debug(
+                            f"Visit #{visit_idx} date {visit_date} != today {today_str}, skipping"
+                        )
+                        continue
+                    
+                    # Собираем информацию о визите
                     ordered = visit.get("ordered")
                     state = visit.get("state")
                     dishes = visit.get("dishes", [])
-                    state_str = visit.get("state_str", "")
+                    state_str = str(visit.get("state_str", "")).lower()
                     
+                    # Логируем данные визита на INFO уровне для диагностики
                     logger.info(
-                        f"Food visit: child={child.id}, date={visit_date}, "
-                        f"ordered={ordered}, state={state} ({state_str}), "
-                        f"dishes_count={len(dishes)}"
+                        f"Visit #{visit_idx}: child={child.id}, raw_date='{raw_date}', "
+                        f"ordered={ordered}, state={state}, state_str='{state_str}', "
+                        f"dishes_count={len(dishes) if dishes else 0}, "
+                        f"price_sum={visit.get('price_sum')}, price={visit.get('price')}"
                     )
                     
-                    # Определяем, было ли питание:
-                    # 1. ordered=1 - ребёнок поел
-                    # 2. state=30 - заказ подтверждён  
-                    # 3. Есть блюда в dishes - дополнительный признак
+                    # Определяем, было ли питание — проверяем все возможные признаки:
                     has_meal = False
+                    meal_reason = ""
                     
-                    if ordered:
+                    # 1. ordered = истинное значение
+                    if ordered and (ordered == 1 or ordered is True or str(ordered) == "1"):
                         has_meal = True
-                        logger.info(f"Meal confirmed by ordered={ordered}")
+                        meal_reason = f"ordered={ordered}"
+                    
+                    # 2. state = 30 (заказ подтверждён)
                     elif state == 30:
                         has_meal = True
-                        logger.info(f"Meal confirmed by state=30")
+                        meal_reason = f"state=30"
+                    
+                    # 3. Есть блюда в dishes
                     elif dishes and len(dishes) > 0:
-                        # Если есть блюда, считаем что питание было
-                        # (иногда ordered не обновляется вовремя)
+                        dish_names = extract_dish_names(dishes)
+                        if dish_names:
+                            has_meal = True
+                            meal_reason = f"dishes ({len(dish_names)} items)"
+                    
+                    # 4. Есть цена > 0 (признак списания)
+                    elif extract_price(visit) > 0:
                         has_meal = True
-                        logger.info(f"Meal confirmed by dishes presence ({len(dishes)} items)")
+                        meal_reason = f"price={extract_price(visit):.0f}"
+                    
+                    # 5. state_str содержит подтверждение
+                    elif "подтвержд" in state_str:
+                        has_meal = True
+                        meal_reason = f"state_str='{state_str}'"
                     
                     if not has_meal:
-                        logger.debug(f"No meal detected for this visit")
+                        logger.info(f"No meal detected for visit #{visit_idx}")
                         continue
                     
+                    logger.info(f"Meal detected: {meal_reason}")
+                    
                     # Уникальный ключ визита для дедупликации
-                    visit_key = f"food:{child.id}:{visit_date}:{visit.get('line', 0)}:{visit.get('time_start', '')}"
+                    line = visit.get("line", visit.get("line_id", 0))
+                    time_start = visit.get("time_start", visit.get("time", ""))
+                    visit_key = f"food:{child.id}:{visit_date}:{line}:{time_start}"
                     
                     # Проверяем через БД, было ли уже отправлено уведомление
                     if await is_notification_sent(user.chat_id, "food", visit_key):
-                        logger.debug(f"Already notified for visit {visit_key}")
+                        logger.info(f"Already notified for visit {visit_key}")
                         continue
                     
                     # Новое питание!
-                    meal_type = visit.get("line_name", "Питание")
+                    meal_type = (
+                        visit.get("line_name") or
+                        visit.get("type_name") or
+                        visit.get("meal_type") or
+                        "Питание"
+                    )
                     
                     # Цена
-                    price_raw = str(visit.get("price_sum") or visit.get("price", "0")).replace(",", ".")
-                    try:
-                        price = float(price_raw)
-                    except ValueError:
-                        price = 0.0
+                    price = extract_price(visit)
                     
                     # Блюда
-                    dish_names = [d.get("text", "") for d in dishes if d.get("text")]
+                    dish_names = extract_dish_names(dishes)
                     
                     # Формируем сообщение
                     msg_lines = [f"🍽 <b>{child.full_name}</b> ({child.group})"]
@@ -341,6 +511,8 @@ class NotificationService:
             if alerts:
                 text = f"🍽 <b>Ребёнок поел!</b> ({today_str})\n\n" + "\n\n".join(alerts)
                 await self._send_notification(user.chat_id, text)
+            else:
+                logger.debug(f"No new food notifications for user {user.chat_id}")
                 
         except Exception as e:
             logger.error(f"Error checking food for user {user.chat_id}: {e}", exc_info=True)
@@ -355,5 +527,10 @@ class NotificationService:
             
             if "blocked" in str(e).lower() or "user is deactivated" in str(e).lower():
                 from ..database import create_or_update_user
-                await create_or_update_user(chat_id, enabled=False, marks_enabled=False)
+                await create_or_update_user(
+                    chat_id,
+                    enabled=False,
+                    marks_enabled=False,
+                    food_enabled=False
+                )
                 logger.info(f"Disabled notifications for blocked user {chat_id}")
