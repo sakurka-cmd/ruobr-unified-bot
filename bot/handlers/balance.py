@@ -3,7 +3,7 @@
 """
 import logging
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -21,13 +21,64 @@ from ..services import (
     get_timetable_for_children, RuobrError, invalidate_user_cache
 )
 from ..utils.formatters import (
-    format_balance, format_food_visit, format_date, truncate_text
+    format_balance, format_date, truncate_text
 )
 from .auth import get_main_keyboard, get_settings_keyboard
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+def _extract_dish_names(dishes) -> list:
+    """Извлечение названий блюд из списка."""
+    if not dishes or not isinstance(dishes, list):
+        return []
+    names = []
+    for dish in dishes:
+        if isinstance(dish, str):
+            if dish.strip():
+                names.append(dish.strip())
+        elif isinstance(dish, dict):
+            name = (
+                dish.get("text") or
+                dish.get("name") or
+                dish.get("title") or
+                dish.get("dish_name") or
+                dish.get("description") or
+                ""
+            )
+            if name and str(name).strip():
+                names.append(str(name).strip())
+    return names
+
+
+def _parse_complex_menu(qs_units) -> list:
+    """Парсинг комплексного меню из qs_unit."""
+    if not qs_units or not isinstance(qs_units, list) or len(qs_units) == 0:
+        return []
+    unit = qs_units[0]
+    if not isinstance(unit, dict):
+        return []
+    about = unit.get("about", "")
+    if not about or not about.strip():
+        return []
+    import re
+    if len(qs_units) > 1:
+        names = []
+        for u in qs_units:
+            name = u.get("name", "") or u.get("title", "") or u.get("text", "")
+            if name.strip():
+                names.append(name.strip())
+        if names:
+            return names
+    parts = re.split(r'(?<!\()\s*(\d{2,3}(?:/\d{1,2})?)\s*', about.strip())
+    dishes = []
+    for i in range(0, len(parts), 2):
+        name = parts[i].strip(' ,.')
+        if name:
+            dishes.append(name)
+    return dishes
 
 
 async def require_authentication(
@@ -115,14 +166,14 @@ async def cmd_balance(message: Message, user_config: Optional[UserConfig] = None
 @router.message(Command("foodtoday"))
 @router.message(F.text == "🍽 Питание сегодня")
 async def cmd_foodtoday(message: Message, user_config: Optional[UserConfig] = None):
-    """Показать информацию о питании за сегодня."""
+    """Показать меню на сегодня — запланированное и фактически полученное."""
     result = await require_authentication(message, user_config)
     if result is None:
         return
     
     login, password, children = result
     
-    status_msg = await message.answer("🔄 Загрузка информации о питании...")
+    status_msg = await message.answer("🔄 Загрузка меню на сегодня...")
     
     try:
         today = date.today()
@@ -130,7 +181,6 @@ async def cmd_foodtoday(message: Message, user_config: Optional[UserConfig] = No
         
         food_info = await get_food_for_children(login, password, children)
         
-        lines = [f"🍽 <b>Питание сегодня ({format_date(today_str)})</b>"]
         found = False
         
         for child in children:
@@ -138,26 +188,76 @@ async def cmd_foodtoday(message: Message, user_config: Optional[UserConfig] = No
             if not info or not info.visits:
                 continue
             
+            child_visits = []
             for visit in info.visits:
-                if visit.get("date") != today_str:
+                vdate = visit.get("date", "")
+                if vdate != today_str:
                     continue
+                child_visits.append(visit)
+            
+            if not child_visits:
+                continue
+            
+            found = True
+            lines = [f"🍽 <b>Меню на сегодня</b> ({format_date(today_str)})"]
+            lines.append(f"👦 <b>{child.full_name}</b> ({child.group})\n")
+            
+            # Сортируем: по line_name / complex / time
+            for visit in child_visits:
+                state = visit.get("state", 0)
+                state_str = visit.get("state_str", "")
+                is_confirmed = state == 30
                 
-                # Проверяем, было ли подтверждённое питание
-                if not visit.get("ordered") and visit.get("state") != 30:
-                    continue
+                # Название приёма пищи
+                meal_name = (
+                    visit.get("complex") or
+                    visit.get("line_name") or
+                    visit.get("type_name") or
+                    "Приём пищи"
+                )
                 
-                found = True
-                visit_text = format_food_visit(visit, child.full_name)
-                lines.append(visit_text)
+                # Стоимость
+                price_raw = str(visit.get("price_sum", "0")).replace(",", ".")
+                try:
+                    price = float(price_raw)
+                except ValueError:
+                    price = 0.0
+                
+                # Блюда: из dishes или qs_unit
+                dish_names = _extract_dish_names(visit.get("dishes", []))
+                if not dish_names:
+                    dish_names = _parse_complex_menu(visit.get("qs_unit", []))
+                
+                if is_confirmed:
+                    lines.append(f"✅ <b>{meal_name}</b> — получено")
+                else:
+                    lines.append(f"📋 <b>{meal_name}</b>")
+                
+                if dish_names:
+                    for dish in dish_names:
+                        lines.append(f"  • {dish}")
+                
+                if price > 0:
+                    lines.append(f"  💰 {price:.0f} ₽")
+                
+                # Показываем статус если не подтверждён и не отменён
+                if not is_confirmed and state != 20:
+                    if state_str:
+                        lines.append(f"  📌 {state_str}")
+                elif state == 20:
+                    lines.append(f"  ❌ Отменён")
+                
+                lines.append("")
+            
+            text = truncate_text("\n".join(lines))
+            await status_msg.edit_text(text)
+            return
         
         if not found:
             await status_msg.edit_text(
                 f"ℹ️ На сегодня ({format_date(today_str)}) "
-                f"подтверждённого питания не найдено."
+                f"нет записей о питании."
             )
-        else:
-            text = truncate_text("\n".join(lines))
-            await status_msg.edit_text(text)
             
     except Exception as e:
         logger.error(f"Error getting food today for user {message.chat.id}: {e}")
