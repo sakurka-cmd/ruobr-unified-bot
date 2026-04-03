@@ -229,53 +229,82 @@ class AchievementDirection:
 
 @dataclass
 class CertificateProgram:
-    """Программа дополнительного образования из сертификата ПФДО."""
-    text: str           # название программы
-    org: str            # учреждение
-    sum_str: str        # стоимость (строка)
-    status_text: str    # статус (Завершена, Зачислен и т.д.)
-    year: str           # год
-    state: str          # числовой статус
-    direction: str      # направление (если есть в данных)
+    """Программа дополнительного образования из сертификата ПФДО.
+    Данные приходят из petition_bad (завершённые) и petition_good (активные).
+    """
+    name: str               # program_name_short
+    name_full: str          # program_name_full
+    org: str                # program_school
+    fund: str               # fund_str (Бесплатно / Сертификат ПФ / Платно)
+    status: str             # статус (текст)
+    start_date: str         # pt_pfdo_contract_start_day
+    end_date: str           # pt_pfdo_contract_date_end
+    direction: str          # направление из do_direction (если сопоставлено)
+    module_name: str        # module_name
+    territory: str          # program_territory
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CertificateProgram':
         return cls(
-            text=data.get("text", "") or data.get("program", ""),
-            org=data.get("org", "") or data.get("organization", ""),
-            sum_str=str(data.get("sum", "") or ""),
-            status_text=data.get("status_text", "") or data.get("status", ""),
-            year=str(data.get("year", "") or ""),
-            state=str(data.get("state", "") or ""),
-            direction=data.get("direction", "") or data.get("direction_str", "")
+            name=data.get("program_name_short", "") or data.get("text", ""),
+            name_full=data.get("program_name_full", ""),
+            org=data.get("program_school", "") or data.get("org", ""),
+            fund=data.get("fund_str", ""),
+            status=data.get("status", ""),
+            start_date=str(data.get("pt_pfdo_contract_start_day", "") or ""),
+            end_date=str(data.get("pt_pfdo_contract_date_end", "") or ""),
+            direction="",  # Заполняется позже при группировке
+            module_name=data.get("module_name", ""),
+            territory=data.get("program_territory", "")
         )
     
     @property
     def is_active(self) -> bool:
-        """Текущая программа (зачислен)."""
-        active_statuses = ("зачислен", "зачислена", "обучается", "действует")
-        return self.status_text.lower().strip() in active_statuses
+        """Активная программа (обучается, зачислен)."""
+        if not self.status:
+            return False
+        status_lower = self.status.lower()
+        # Активные: не содержат "завершено"
+        return "завершено" not in status_lower and "окончен" not in status_lower
 
 
 @dataclass
 class Certificate:
     """Данные по сертификату ПФДО."""
-    number: str             # номер сертификата
-    nominal: str            # номинал
-    balance: str            # остаток
-    programs: List[CertificateProgram]
+    number: str                     # number_cert
+    nominal: str                    # rmc_nominal
+    balance: str                    # balance
+    balance_start: str              # balance_start
+    group_name: str                 # cert_group_name
+    territory: str                  # cert_territory
+    programs_active: List[CertificateProgram]   # petition_good
+    programs_completed: List[CertificateProgram]  # petition_bad
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Certificate':
-        raw_programs = data.get("list", []) or data.get("programs", []) or []
-        programs = [CertificateProgram.from_dict(p) for p in raw_programs]
+        programs_active = [
+            CertificateProgram.from_dict(p) 
+            for p in (data.get("petition_good", []) or [])
+        ]
+        programs_completed = [
+            CertificateProgram.from_dict(p) 
+            for p in (data.get("petition_bad", []) or [])
+        ]
         
         return cls(
-            number=str(data.get("number", "") or data.get("cert_number", "")),
-            nominal=str(data.get("nominal", "") or ""),
+            number=str(data.get("number_cert", "") or ""),
+            nominal=str(data.get("rmc_nominal", "") or ""),
             balance=str(data.get("balance", "") or ""),
-            programs=programs
+            balance_start=str(data.get("balance_start", "") or ""),
+            group_name=str(data.get("cert_group_name", "") or ""),
+            territory=str(data.get("cert_territory", "") or ""),
+            programs_active=programs_active,
+            programs_completed=programs_completed
         )
+    
+    @property
+    def all_programs(self) -> List[CertificateProgram]:
+        return self.programs_active + self.programs_completed
 
 
 @dataclass
@@ -593,7 +622,7 @@ class RuobrClient:
         
         if not isinstance(result, dict):
             logger.warning(f"Unexpected certificate response type: {type(result)}")
-            return Certificate(number="", nominal="", balance="", programs=[])
+            return Certificate(number="", nominal="", balance="", balance_start="", group_name="", territory="", programs_active=[], programs_completed=[])
         
         # Логируем полную структуру для отладки
         import json

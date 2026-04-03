@@ -400,172 +400,139 @@ async def show_teachers(message: Message, login: str, password: str, child_index
         await status_msg.edit_text(f"❌ Ошибка: {e}")
 
 
-def _format_program(p, show_org=True) -> str:
-    """Форматирование одной программы."""
-    parts = [f"  • {p.text}"]
-    if show_org and p.org:
+def _format_program(p) -> str:
+    """Форматирование одной программы из ПФДО."""
+    parts = [f"  • {p.name}"]
+    if p.org:
         parts.append(f"    🏢 {p.org}")
-    if p.year:
-        parts.append(f"    📅 {p.year}")
-    if p.sum_str and p.sum_str not in ("0", "0.0", ""):
-        parts.append(f"    💰 {p.sum_str}")
+    # Период
+    dates = []
+    if p.start_date:
+        try:
+            d = p.start_date.split("-")
+            dates.append(f"{d[2]}.{d[1]}.{d[0]}")
+        except:
+            dates.append(p.start_date)
+    if p.end_date and p.end_date != "None":
+        try:
+            d = p.end_date.split("-")
+            dates.append(f"{d[2]}.{d[1]}.{d[0]}")
+        except:
+            dates.append(p.end_date)
+    if dates:
+        sep = " \u2014 " if len(dates) == 2 else ""
+        parts.append(f"    📅 {dates[0]}{sep}{dates[1] if len(dates) == 2 else ''}")
+    if p.fund:
+        parts.append(f"    💰 {p.fund}")
     return "\n".join(parts)
 
 
-def _group_programs_by_direction(programs, directions):
+def _match_direction(program_name: str, directions):
     """
-    Группировка программ по направлениям.
-    Возвращает dict {direction_name: [programs]}.
-    Programs без направления попадают в "Другое".
+    Сопоставление программы с направлением по ключевым словам.
+    Возвращает название направления или "Другое".
     """
-    # Если у программ есть поле direction — группируем по нему
-    has_direction_field = any(p.direction for p in programs)
+    name_lower = program_name.lower()
     
-    if has_direction_field:
-        groups = {}
-        for p in programs:
-            key = p.direction or "Другое"
-            groups.setdefault(key, []).append(p)
-        return groups
+    keywords_map = {
+        "художественн": [
+            "художеств", "музык", "танц", "театр", "рисован", "вокал", "хор",
+            "искусств", "дизайн", "фото", "кино", "анимац", "оригами",
+            "бисер", "керамика", "скульптур", "живопи", "график",
+            "декор", "кружок", "хореограф", "балет", "ритмик",
+            "аккордеон", "гитар", "фортепиан", "скрипк", "домр",
+            "баян", "инструмент"
+        ],
+        "техничес": [
+            "техн", "робот", "программир", "информат", "моделир",
+            "авиа", "косм", "инженер", "электрон", "конструир",
+            "лего", "3d", "строч", "черчен", "компьютер"
+        ],
+        "спортив": [
+            "спорт", "футб", "хокк", "баскетб", "волейб", "плаван",
+            "борьб", "гимнаст", "каратэ", "самбо", "дзюдо", "бокс",
+            "шахмат", "фигур", "фитнес", "йога", "aelim",
+            "дзю-до", "таэквондо", "бадминтон", "теннис"
+        ],
+        "социально-гуманитарн": [
+            "социальн", "гуманитар", "эколог", "туризм", "патриот",
+            "медиа", "журнал", "психолог", "волонтёр", "волонтер",
+            "краевед", "безопасн", "професси", "дорожн", "движение",
+            "развитие", "обществ", "коммуникац"
+        ],
+        "естественнонаучн": [
+            "биолог", "хим", "физик", "математ", "наук",
+            "исследован", "лаборатор", "окружающ", "эксперимент",
+            "астроном", "географ", "природ"
+        ],
+    }
     
-    # Иначе — пробуем сопоставить по названиям направлений
-    direction_names = {d.direction for d in directions}
-    groups = {}
-    ungrouped = []
-    
-    for p in programs:
-        matched = False
-        for dname in direction_names:
-            # Проверяем вхождение ключевых слов направления в название программы
-            dname_lower = dname.lower()
-            text_lower = p.text.lower()
-            # Простые сопоставления по ключевым словам
-            keywords = {
-                "художественн": ["художеств", "музык", "танц", "театр", "рисован", "вокал", "хор", "искусств", "дизайн", "фото", "кино", "анимац"],
-                "техничес": ["технич", "робот", "программир", "информат", "моделир", "авиа", "косм", "инженер", "электрон", "конструир"],
-                "спортив": ["спорт", "футб", "хокк", "баскетб", "волейб", "плаван", "борьб", "гимнаст", "каратэ", "самбо", "дзюдо", "бокс", "шахмат"],
-                "социально-гуманитарн": ["социальн", "гуманитар", "эколог", "туризм", "патриот", "медиа", "журнал", "психолог", "волонтёр", "волонтер", "краевед"],
-                "естественнонаучн": ["биолог", "хим", "физик", "математ", "наук", "исследован", "лаборатор"],
-            }
-            for dkey, kws in keywords.items():
-                if dkey in dname_lower:
-                    if any(kw in text_lower for kw in kws):
-                        groups.setdefault(dname, []).append(p)
-                        matched = True
-                        break
-            if matched:
-                break
-        if not matched:
-            ungrouped.append(p)
-    
-    if ungrouped:
-        groups.setdefault("Другое", []).extend(ungrouped)
-    
-    # Добавляем направления без программ (пустые)
     for d in directions:
-        if d.direction not in groups:
-            groups[d.direction] = []
-    
-    return groups
+        d_lower = d.direction.lower()
+        for dkey, kws in keywords_map.items():
+            if dkey in d_lower:
+                if any(kw in name_lower for kw in kws):
+                    return d.direction
+    return "Другое"
 
 
 def _build_education_text(child_name: str, achievements, certificate):
     """
     Формирование текста сообщения о доп. образовании.
-    Программы группируются по направлениям и разделяются на текущие/прошлые.
+    Программы из сертификата ПФДО, группируются по направлениям из achievements.
     """
     lines = [f"🎓 <b>Дополнительное образование</b> — {child_name}"]
     
-    # Собираем все программы из двух источников
-    all_programs = list(certificate.programs) if certificate else []
+    directions = achievements.directions if achievements else []
     
-    # Также проверяем, вложены ли программы в направления из achievements
-    nested_programs = []
-    if achievements:
-        for d in achievements.directions:
-            if d.programs:
-                for p_raw in d.programs:
-                    # Конвертируем сырые данные в CertificateProgram
-                    from ..services import CertificateProgram
-                    nested_programs.append(CertificateProgram.from_dict(p_raw))
-    
-    # Если есть вложенные программы в направлениях — используем их
-    use_nested = len(nested_programs) > 0
-    if use_nested:
-        all_programs = nested_programs
-    
-    if not all_programs:
+    if not certificate:
         lines.append("\nДанных о дополнительном образовании пока нет.")
         return "\n".join(lines)
     
-    # Разделяем на текущие и завершённые
-    active = [p for p in all_programs if p.is_active]
-    completed = [p for p in all_programs if not p.is_active]
+    active = certificate.programs_active
+    completed = certificate.programs_completed
     
-    # Группируем по направлениям
-    directions = achievements.directions if achievements else []
+    if not active and not completed:
+        lines.append("\nДанных о дополнительном образовании пока нет.")
+        return "\n".join(lines)
     
-    # Текущие программы
     if active:
+        groups = {}
+        for p in active:
+            dname = _match_direction(p.name, directions)
+            p.direction = dname
+            groups.setdefault(dname, []).append(p)
+        
         lines.append(f"\n✅ <b>Текущие программы</b> ({len(active)}):")
-        if use_nested:
-            # Программы уже сгруппированы по направлениям внутри achievements
-            for d in directions:
-                if d.programs:
-                    dir_active = []
-                    for p_raw in d.programs:
-                        from ..services import CertificateProgram
-                        p = CertificateProgram.from_dict(p_raw)
-                        if p.is_active:
-                            dir_active.append(p)
-                    if dir_active:
-                        lines.append(f"\n📍 <b>{d.direction}</b>")
-                        for p in dir_active:
-                            lines.append(_format_program(p))
-        else:
-            active_groups = _group_programs_by_direction(active, directions)
-            for dname, progs in active_groups.items():
-                if progs:
-                    lines.append(f"\n📍 <b>{dname}</b>")
-                    for p in progs:
-                        lines.append(_format_program(p))
+        sorted_groups = sorted(groups.items(), key=lambda x: (x[0] == "Другое", x[0]))
+        for dname, progs in sorted_groups:
+            lines.append(f"\n📍 <b>{dname}</b>")
+            for p in progs:
+                lines.append(_format_program(p))
     
-    # Завершённые программы
     if completed:
+        groups = {}
+        for p in completed:
+            dname = _match_direction(p.name, directions)
+            p.direction = dname
+            groups.setdefault(dname, []).append(p)
+        
         lines.append(f"\n📜 <b>Прошлые программы</b> ({len(completed)}):")
-        if use_nested:
-            for d in directions:
-                if d.programs:
-                    dir_completed = []
-                    for p_raw in d.programs:
-                        from ..services import CertificateProgram
-                        p = CertificateProgram.from_dict(p_raw)
-                        if not p.is_active:
-                            dir_completed.append(p)
-                    if dir_completed:
-                        lines.append(f"\n📍 <b>{d.direction}</b>")
-                        for p in dir_completed:
-                            lines.append(_format_program(p))
-        else:
-            completed_groups = _group_programs_by_direction(completed, directions)
-            for dname, progs in completed_groups.items():
-                if progs:
-                    lines.append(f"\n📍 <b>{dname}</b>")
-                    for p in progs:
-                        lines.append(_format_program(p))
+        sorted_groups = sorted(groups.items(), key=lambda x: (x[0] == "Другое", x[0]))
+        for dname, progs in sorted_groups:
+            lines.append(f"\n📍 <b>{dname}</b>")
+            for p in progs:
+                lines.append(_format_program(p))
     
     # Информация о сертификате
-    if certificate:
-        cert_info = []
-        if certificate.number:
-            cert_info.append(f"  № {certificate.number}")
-        if certificate.nominal:
-            cert_info.append(f"номинал: {certificate.nominal}")
-        if certificate.balance:
-            cert_info.append(f"остаток: {certificate.balance}")
-        if cert_info:
-            lines.append(f"\n💳 <b>Сертификат ПФДО:</b>")
-            lines.append("  " + " | ".join(cert_info))
+    cert_parts = []
+    if certificate.number:
+        cert_parts.append(f"№ {certificate.number}")
+    if certificate.balance:
+        cert_parts.append(certificate.balance)
+    if cert_parts:
+        lines.append(f"\n💳 <b>Сертификат ПФДО:</b>")
+        lines.append(f"  {' | '.join(cert_parts)}")
     
     return "\n".join(lines)
 
