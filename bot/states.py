@@ -20,3 +20,11 @@ class NotificationStates(StatesGroup):
     """Состояния настройки уведомлений."""
     choosing_notification_type = State()
     setting_parameters = State()
+
+
+class BirthdaySettingsStates(StatesGroup):
+    """Состояния настройки уведомлений о днях рождения."""
+    choosing_child = State()
+    choosing_mode = State()
+    setting_weekday = State()
+    setting_time = State()

@@ -41,7 +41,7 @@ from bot.middlewares import (
     ThrottlingMiddleware
 )
 from aiogram.types import CallbackQuery
-from bot.handlers import auth, balance, schedule
+from bot.handlers import auth, balance, schedule, birthday
 from bot.services.notifications import NotificationService
 from bot.services.cache import periodic_cache_cleanup
 
@@ -141,6 +141,7 @@ async def main() -> None:
     dp.include_router(auth.router)
     dp.include_router(balance.router)
     dp.include_router(schedule.router)
+    dp.include_router(birthday.router)
     
     # Сервис уведомлений
     notification_service = NotificationService(bot)

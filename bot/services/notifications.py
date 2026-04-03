@@ -3,7 +3,7 @@
 """
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from aiogram import Bot
@@ -16,12 +16,15 @@ from ..database import (
     is_notification_sent,
     mark_notification_sent,
     cleanup_old_notifications,
+    get_users_with_birthday_notifications,
+    get_birthday_settings,
     UserConfig
 )
-from ..services import (
+from . import (
     get_children_async,
     get_food_for_children,
     get_timetable_for_children,
+    get_classmates_for_child,
     Child
 )
 from ..utils.formatters import truncate_text
@@ -366,6 +369,10 @@ class NotificationService:
         # Уведомления о питании
         if user.food_enabled:
             await self._check_food_notifications(user, children)
+        
+        # Уведомления о днях рождения
+        if getattr(user, 'birthday_enabled', False):
+            await self._check_birthday_notifications(user, children)
     
     async def _check_balance_notifications(
         self,
@@ -651,6 +658,175 @@ class NotificationService:
                     chat_id,
                     enabled=False,
                     marks_enabled=False,
-                    food_enabled=False
+                    food_enabled=False,
+                    birthday_enabled=False
                 )
                 logger.info(f"Disabled notifications for blocked user {chat_id}")
+
+    async def _check_birthday_notifications(
+        self,
+        user: UserConfig,
+        children: List[Child]
+    ) -> None:
+        """
+        Проверка и отправка уведомлений о днях рождения одноклассников.
+        Поддерживает два режима: 'tomorrow' и 'weekly'.
+        """
+        try:
+            # Часовой пояс Новосибирск (GMT+7)
+            tz = timezone(timedelta(hours=7))
+            now = datetime.now(tz)
+
+            for child_idx, child in enumerate(children):
+                settings = await get_birthday_settings(user.chat_id, child.id)
+                if not settings.get("enabled", False):
+                    continue
+
+                mode = settings.get("mode", "tomorrow")
+                notify_hour = settings.get("notify_hour", 7)
+                notify_minute = settings.get("notify_minute", 0)
+
+                # Проверяем совпадение времени
+                if now.hour != notify_hour or now.minute < notify_minute:
+                    continue
+                if now.minute > notify_minute + 2:
+                    # Прошло больше 2 минут — пропускаем этот час
+                    continue
+
+                if mode == "tomorrow":
+                    await self._process_tomorrow_mode(user, child, child_idx, now, tz)
+                elif mode == "weekly":
+                    await self._process_weekly_mode(user, child, child_idx, now, tz)
+
+        except Exception as e:
+            logger.error(f"Error checking birthday notifications for user {user.chat_id}: {e}", exc_info=True)
+
+    async def _process_tomorrow_mode(
+        self,
+        user: UserConfig,
+        child: Child,
+        child_idx: int,
+        now: datetime,
+        tz: timezone
+    ) -> None:
+        """Обработка режима «завтра» — уведомляет о ДР завтрашнего дня."""
+        tomorrow = (now + timedelta(days=1)).date()
+
+        # Дедупликация
+        notif_key = f"birthday:{child.id}:{tomorrow.isoformat()}"
+        if await is_notification_sent(user.chat_id, "birthday", notif_key):
+            return
+
+        # Получаем одноклассников
+        try:
+            classmates = await get_classmates_for_child(
+                user.login, user.password, child_idx
+            )
+        except Exception as e:
+            logger.warning(f"Failed to fetch classmates for child {child.id}: {e}")
+            return
+
+        birthday_kids = []
+        for c in classmates:
+            if not c.birth_date:
+                continue
+            try:
+                bd = datetime.strptime(c.birth_date, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                continue
+
+            if (bd.month, bd.day) == (tomorrow.month, tomorrow.day):
+                age = tomorrow.year - bd.year
+                birthday_kids.append((c, age))
+
+        if not birthday_kids:
+            return
+
+        tomorrow_str = tomorrow.strftime("%d.%m")
+        lines = [f"🎂 <b>Дни рождения одноклассников</b>\n"]
+        lines.append(f"👦 <b>{child.full_name}</b> ({child.group}):\n")
+        lines.append(f"Завтра ({tomorrow_str}):")
+
+        for c, age in birthday_kids:
+            lines.append(f"  🎁 {c.full_name} — {age} лет")
+
+        text = "\n".join(lines)
+        await self._send_notification(user.chat_id, text)
+        await mark_notification_sent(user.chat_id, "birthday", notif_key)
+        logger.info(f"Sent tomorrow birthday notification for child {child.id}: {len(birthday_kids)} birthdays")
+
+    async def _process_weekly_mode(
+        self,
+        user: UserConfig,
+        child: Child,
+        child_idx: int,
+        now: datetime,
+        tz: timezone
+    ) -> None:
+        """Обработка еженедельного режима — уведомляет о ДР на предстоящей неделе."""
+        notify_weekday = await self._get_weekday_from_settings(user.chat_id, child.id)
+        if now.weekday() != notify_weekday:
+            return
+
+        # Вычисляем начало и конец недели (7 дней начиная с текущего дня)
+        week_start = now.date()
+        week_end = week_start + timedelta(days=6)
+
+        # Дедупликация: по году и номеру недели
+        year_week = now.strftime("%Y-W%W")
+        notif_key = f"birthday:{child.id}:{year_week}"
+        if await is_notification_sent(user.chat_id, "birthday", notif_key):
+            return
+
+        # Получаем одноклассников
+        try:
+            classmates = await get_classmates_for_child(
+                user.login, user.password, child_idx
+            )
+        except Exception as e:
+            logger.warning(f"Failed to fetch classmates for child {child.id}: {e}")
+            return
+
+        # Группируем дни рождения по датам
+        birthday_by_date: Dict[date, List[tuple]] = {}
+        for c in classmates:
+            if not c.birth_date:
+                continue
+            try:
+                bd = datetime.strptime(c.birth_date, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                continue
+
+            # Ищем совпадение дня рождения в диапазоне недели
+            for day_offset in range(7):
+                check_date = week_start + timedelta(days=day_offset)
+                if (bd.month, bd.day) == (check_date.month, check_date.day):
+                    age = check_date.year - bd.year
+                    birthday_by_date.setdefault(check_date, []).append((c, age))
+                    break
+
+        if not birthday_by_date:
+            return
+
+        lines = [f"🎂 <b>Дни рождения одноклассников</b>\n"]
+        lines.append(f"👦 <b>{child.full_name}</b> ({child.group}):\n")
+
+        for check_date in sorted(birthday_by_date.keys()):
+            date_str = check_date.strftime("%d.%m")
+            lines.append(f"  {date_str}:")
+            for c, age in birthday_by_date[check_date]:
+                lines.append(f"    🎁 {c.full_name} — {age} лет")
+
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+
+        await self._send_notification(user.chat_id, text)
+        await mark_notification_sent(user.chat_id, "birthday", notif_key)
+        total = sum(len(v) for v in birthday_by_date.values())
+        logger.info(f"Sent weekly birthday notification for child {child.id}: {total} birthdays")
+
+    async def _get_weekday_from_settings(self, chat_id: int, child_id: int) -> int:
+        """Получить день недели (0=Mon, 6=Sun) из настроек."""
+        settings = await get_birthday_settings(chat_id, child_id)
+        return settings.get("notify_weekday", 1)

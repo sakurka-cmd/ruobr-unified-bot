@@ -29,6 +29,7 @@ class UserConfig:
     enabled: bool = False
     marks_enabled: bool = True
     food_enabled: bool = True
+    birthday_enabled: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
@@ -139,10 +140,25 @@ class DatabasePool:
                     UNIQUE(chat_id, notification_type, notification_key)
                 );
                 
+                -- Таблица настроек уведомлений о днях рождения
+                CREATE TABLE IF NOT EXISTS birthday_settings (
+                    chat_id INTEGER NOT NULL,
+                    child_id INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    mode TEXT NOT NULL DEFAULT 'tomorrow',
+                    notify_weekday INTEGER DEFAULT 1,
+                    notify_hour INTEGER DEFAULT 7,
+                    notify_minute INTEGER DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (chat_id, child_id),
+                    FOREIGN KEY (chat_id) REFERENCES users(chat_id) ON DELETE CASCADE
+                );
+                
                 -- Индексы для оптимизации
                 CREATE INDEX IF NOT EXISTS idx_thresholds_chat_id ON thresholds(chat_id);
                 CREATE INDEX IF NOT EXISTS idx_users_enabled ON users(enabled);
                 CREATE INDEX IF NOT EXISTS idx_notification_history_chat ON notification_history(chat_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_birthday_settings_chat ON birthday_settings(chat_id);
             """)
             await conn.commit()
             
@@ -156,6 +172,11 @@ class DatabasePool:
                     await conn.execute("ALTER TABLE users ADD COLUMN food_enabled INTEGER NOT NULL DEFAULT 1")
                     await conn.commit()
                     logger.info("Migration: added food_enabled column to users table")
+                
+                if "birthday_enabled" not in column_names:
+                    await conn.execute("ALTER TABLE users ADD COLUMN birthday_enabled INTEGER NOT NULL DEFAULT 0")
+                    await conn.commit()
+                    logger.info("Migration: added birthday_enabled column to users table")
             except Exception as e:
                 logger.warning(f"Migration check failed (may be normal): {e}")
     
@@ -224,6 +245,7 @@ async def get_user(chat_id: int) -> Optional[UserConfig]:
                 enabled=bool(row["enabled"]),
                 marks_enabled=bool(row["marks_enabled"]),
                 food_enabled=bool(row["food_enabled"]) if "food_enabled" in row.keys() else True,
+                birthday_enabled=bool(row["birthday_enabled"]) if "birthday_enabled" in row.keys() else False,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"]
             )
@@ -235,7 +257,8 @@ async def create_or_update_user(
     password: Optional[str] = None,
     enabled: Optional[bool] = None,
     marks_enabled: Optional[bool] = None,
-    food_enabled: Optional[bool] = None
+    food_enabled: Optional[bool] = None,
+    birthday_enabled: Optional[bool] = None
 ) -> UserConfig:
     """
     Создание или обновление пользователя.
@@ -247,6 +270,7 @@ async def create_or_update_user(
         enabled: Включены ли уведомления о балансе.
         marks_enabled: Включены ли уведомления об оценках.
         food_enabled: Включены ли уведомления о питании.
+        birthday_enabled: Включены ли уведомления о днях рождения.
         
     Returns:
         Обновлённая конфигурация пользователя.
@@ -283,6 +307,9 @@ async def create_or_update_user(
             if food_enabled is not None:
                 updates.append("food_enabled = ?")
                 params.append(1 if food_enabled else 0)
+            if birthday_enabled is not None:
+                updates.append("birthday_enabled = ?")
+                params.append(1 if birthday_enabled else 0)
             
             params.append(chat_id)
             await conn.execute(
@@ -292,15 +319,16 @@ async def create_or_update_user(
         else:
             # Создаём нового пользователя
             await conn.execute(
-                """INSERT INTO users (chat_id, login, password_encrypted, enabled, marks_enabled, food_enabled)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO users (chat_id, login, password_encrypted, enabled, marks_enabled, food_enabled, birthday_enabled)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     chat_id,
                     login,
                     password_encrypted,
                     1 if enabled else 0 if enabled is not None else 0,
                     1 if marks_enabled else 0 if marks_enabled is not None else 1,
-                    1 if food_enabled else 0 if food_enabled is not None else 1
+                    1 if food_enabled else 0 if food_enabled is not None else 1,
+                    1 if birthday_enabled else 0 if birthday_enabled is not None else 0
                 )
             )
         
@@ -313,7 +341,7 @@ async def get_all_enabled_users() -> List[UserConfig]:
     """Получение всех пользователей с включёнными уведомлениями."""
     async with db_pool.connection() as conn:
         async with conn.execute(
-            "SELECT * FROM users WHERE enabled = 1 OR marks_enabled = 1 OR food_enabled = 1"
+            "SELECT * FROM users WHERE enabled = 1 OR marks_enabled = 1 OR food_enabled = 1 OR birthday_enabled = 1"
         ) as cursor:
             rows = await cursor.fetchall()
             return [
@@ -323,7 +351,8 @@ async def get_all_enabled_users() -> List[UserConfig]:
                     password_encrypted=row["password_encrypted"],
                     enabled=bool(row["enabled"]),
                     marks_enabled=bool(row["marks_enabled"]),
-                    food_enabled=bool(row["food_enabled"]) if "food_enabled" in row.keys() else True
+                    food_enabled=bool(row["food_enabled"]) if "food_enabled" in row.keys() else True,
+                    birthday_enabled=bool(row["birthday_enabled"]) if "birthday_enabled" in row.keys() else False
                 )
                 for row in rows
             ]
@@ -434,3 +463,143 @@ async def clear_fsm_state(chat_id: int) -> None:
     async with db_pool.connection() as conn:
         await conn.execute("DELETE FROM fsm_states WHERE chat_id = ?", (chat_id,))
         await conn.commit()
+
+
+# ===== Операции с настройками дней рождения =====
+
+BIRTHDAY_DEFAULTS = {
+    "enabled": 0,
+    "mode": "tomorrow",
+    "notify_weekday": 1,
+    "notify_hour": 7,
+    "notify_minute": 0,
+}
+
+
+async def get_birthday_settings(chat_id: int, child_id: int) -> Dict[str, Any]:
+    """
+    Получение настроек уведомлений о днях рождения для ребёнка.
+    
+    Args:
+        chat_id: ID чата пользователя.
+        child_id: ID ребёнка.
+        
+    Returns:
+        Словарь с настройками или значения по умолчанию.
+    """
+    async with db_pool.connection() as conn:
+        async with conn.execute(
+            "SELECT * FROM birthday_settings WHERE chat_id = ? AND child_id = ?",
+            (chat_id, child_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return dict(BIRTHDAY_DEFAULTS)
+            
+            return {
+                "enabled": bool(row["enabled"]),
+                "mode": row["mode"],
+                "notify_weekday": row["notify_weekday"],
+                "notify_hour": row["notify_hour"],
+                "notify_minute": row["notify_minute"],
+            }
+
+
+async def set_birthday_settings(
+    chat_id: int,
+    child_id: int,
+    enabled: bool,
+    mode: str,
+    notify_weekday: int,
+    notify_hour: int,
+    notify_minute: int
+) -> None:
+    """
+    Установка настроек уведомлений о днях рождения для ребёнка.
+    
+    Args:
+        chat_id: ID чата пользователя.
+        child_id: ID ребёнка.
+        enabled: Включены ли уведомления.
+        mode: Режим ('tomorrow' или 'weekly').
+        notify_weekday: День недели (0=Mon, 6=Sun) для weekly режима.
+        notify_hour: Час уведомления (0-23).
+        notify_minute: Минута уведомления (0-59).
+    """
+    async with db_pool.connection() as conn:
+        await conn.execute(
+            """INSERT INTO birthday_settings 
+               (chat_id, child_id, enabled, mode, notify_weekday, notify_hour, notify_minute, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(chat_id, child_id) DO UPDATE SET 
+                   enabled = excluded.enabled,
+                   mode = excluded.mode,
+                   notify_weekday = excluded.notify_weekday,
+                   notify_hour = excluded.notify_hour,
+                   notify_minute = excluded.notify_minute,
+                   updated_at = CURRENT_TIMESTAMP""",
+            (chat_id, child_id, 1 if enabled else 0, mode, notify_weekday, notify_hour, notify_minute)
+        )
+        await conn.commit()
+
+
+async def get_all_birthday_settings(chat_id: int) -> List[Dict[str, Any]]:
+    """
+    Получение настроек дней рождения для всех детей пользователя.
+    
+    Args:
+        chat_id: ID чата пользователя.
+        
+    Returns:
+        Список словарей с настройками.
+    """
+    async with db_pool.connection() as conn:
+        async with conn.execute(
+            "SELECT * FROM birthday_settings WHERE chat_id = ?",
+            (chat_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "chat_id": row["chat_id"],
+                    "child_id": row["child_id"],
+                    "enabled": bool(row["enabled"]),
+                    "mode": row["mode"],
+                    "notify_weekday": row["notify_weekday"],
+                    "notify_hour": row["notify_hour"],
+                    "notify_minute": row["notify_minute"],
+                }
+                for row in rows
+            ]
+
+
+async def get_users_with_birthday_notifications() -> List[Dict[str, Any]]:
+    """
+    Получение всех пользователей, у которых включены уведомления о ДР
+    хотя бы для одного ребёнка.
+    
+    Returns:
+        Список словарей с chat_id и настройками.
+    """
+    async with db_pool.connection() as conn:
+        async with conn.execute(
+            """SELECT DISTINCT u.chat_id, u.login, u.password_encrypted, u.birthday_enabled,
+                      bs.child_id, bs.mode, bs.notify_weekday, bs.notify_hour, bs.notify_minute
+               FROM users u
+               INNER JOIN birthday_settings bs ON u.chat_id = bs.chat_id
+               WHERE u.birthday_enabled = 1 AND bs.enabled = 1"""
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "chat_id": row["chat_id"],
+                    "login": row["login"],
+                    "password_encrypted": row["password_encrypted"],
+                    "child_id": row["child_id"],
+                    "mode": row["mode"],
+                    "notify_weekday": row["notify_weekday"],
+                    "notify_hour": row["notify_hour"],
+                    "notify_minute": row["notify_minute"],
+                }
+                for row in rows
+            ]

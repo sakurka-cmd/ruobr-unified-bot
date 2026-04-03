@@ -38,8 +38,8 @@ def get_settings_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🔑 Изменить логин/пароль"), KeyboardButton(text="💰 Порог баланса")],
-            [KeyboardButton(text="🔔 Уведомления"), KeyboardButton(text="👤 Мой профиль")],
-            [KeyboardButton(text="◀️ Назад")],
+            [KeyboardButton(text="🔔 Уведомления"), KeyboardButton(text="🎂 Дни рождения")],
+            [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="◀️ Назад")],
         ],
         resize_keyboard=True
     )
@@ -947,11 +947,13 @@ def get_notification_keyboard(user_config: UserConfig) -> InlineKeyboardMarkup:
     balance_status = "✅" if user_config.enabled else "❌"
     marks_status = "✅" if user_config.marks_enabled else "❌"
     food_status = "✅" if getattr(user_config, 'food_enabled', True) else "❌"
+    birthday_status = "✅" if getattr(user_config, 'birthday_enabled', False) else "❌"
     
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"💰 Баланс: {balance_status}", callback_data="toggle_balance")],
         [InlineKeyboardButton(text=f"⭐ Оценки: {marks_status}", callback_data="toggle_marks")],
         [InlineKeyboardButton(text=f"🍽 Питание: {food_status}", callback_data="toggle_food")],
+        [InlineKeyboardButton(text=f"🎂 Дни рождения: {birthday_status}", callback_data="toggle_birthday")],
     ])
 
 
@@ -1011,6 +1013,22 @@ async def cb_toggle_food(callback: CallbackQuery, user_config: Optional[UserConf
     
     new_status = not getattr(user_config, 'food_enabled', True)
     await create_or_update_user(callback.message.chat.id, food_enabled=new_status)
+    await callback.answer(f"{'Включено' if new_status else 'Выключено'}!")
+    
+    updated = await get_user(callback.message.chat.id)
+    await callback.message.edit_reply_markup(reply_markup=get_notification_keyboard(updated))
+
+
+@router.callback_query(F.data == "toggle_birthday")
+async def cb_toggle_birthday(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
+    if user_config is None:
+        user_config = await get_user(callback.message.chat.id)
+    if user_config is None:
+        await callback.answer("Ошибка!")
+        return
+    
+    new_status = not getattr(user_config, 'birthday_enabled', False)
+    await create_or_update_user(callback.message.chat.id, birthday_enabled=new_status)
     await callback.answer(f"{'Включено' if new_status else 'Выключено'}!")
     
     updated = await get_user(callback.message.chat.id)
