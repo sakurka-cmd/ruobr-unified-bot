@@ -369,6 +369,18 @@ async def cb_set_hour(callback: CallbackQuery):
 
     await callback.answer()
 
+    # Сохраняем выбранный час в БД, чтобы cb_set_minute мог его прочитать
+    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    await set_birthday_settings(
+        chat_id=callback.message.chat.id,
+        child_id=child_id,
+        enabled=True,
+        mode=settings.get("mode", "tomorrow"),
+        notify_weekday=settings.get("notify_weekday", 1),
+        notify_hour=hour,
+        notify_minute=settings.get("notify_minute", 0),
+    )
+
     # Показываем выбор минут
     await _show_minute_selection(
         callback.message,
