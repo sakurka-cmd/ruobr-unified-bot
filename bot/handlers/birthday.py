@@ -202,63 +202,7 @@ async def cb_child_settings(callback: CallbackQuery, user_config: Optional[UserC
     child_id = int(parts[2])
     child_index = int(parts[3])
 
-    # Получаем детей для имени
-    try:
-        children = await get_children_async(user_config.login, user_config.password)
-    except Exception:
-        await callback.message.edit_text("❌ Ошибка получения списка детей.")
-        return
-
-    if not children or child_index >= len(children):
-        await callback.message.edit_text("❌ Ребёнок не найден.")
-        return
-
-    child = children[child_index]
-    settings = await get_birthday_settings(callback.message.chat.id, child.id)
-
-    is_enabled = settings.get("enabled", False)
-    mode = settings.get("mode", "tomorrow")
-
-    # Клавиатура
-    buttons = []
-
-    # Переключатель
-    btn_text = f"{'🔴' if is_enabled else '🟢'} Включить для {child.full_name}"
-    buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"bd_enable_{child.id}_{child_index}")])
-
-    if is_enabled:
-        # Режимы
-        mode_tomorrow = "✅ " if mode == "tomorrow" else ""
-        mode_weekly = "✅ " if mode == "weekly" else ""
-
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"{mode_tomorrow}📅 Уведомлять о ДР завтра",
-                callback_data=f"bd_mode_tomorrow_{child.id}_{child_index}",
-            )
-        ])
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"{mode_weekly}📋 Уведомлять о ДР на предстоящей неделе",
-                callback_data=f"bd_mode_weekly_{child.id}_{child_index}",
-            )
-        ])
-
-        desc = _get_mode_description(settings)
-        buttons.append([InlineKeyboardButton(
-            text=f"⏰ Текущее время: {desc}",
-            callback_data="bd_noop",
-        )])
-
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="bd_back_to_menu")])
-
-    status_text = "✅ Включено" if is_enabled else "❌ Выключено"
-    text = (
-        f"👦 <b>{child.full_name}</b> ({child.group})\n"
-        f"Статус: <b>{status_text}</b>"
-    )
-
-    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await _show_child_settings_screen(callback, user_config, child_id, child_index)
 
 
 @router.callback_query(F.data == "bd_back_to_menu")
@@ -312,17 +256,9 @@ async def cb_toggle_child_enable(callback: CallbackQuery, user_config: Optional[
 
     await callback.answer(f"{'Включено' if new_enabled else 'Выключено'}!")
 
-    # Переоткрываем настройки ребёнка
+    # Обновляем экран настроек ребёнка
     updated_user = await get_user(callback.message.chat.id)
-    # Эмулируем повторный callback для bd_child_
-    await callback.message.edit_text(
-        "🔄 Загрузка...",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
-    )
-    # Вызываем повторно
-    fake_data = f"bd_child_{child_id}_{child_index}"
-    callback.data = fake_data
-    await cb_child_settings(callback, updated_user)
+    await _show_child_settings_screen(callback, updated_user, child_id, child_index)
 
 
 @router.callback_query(F.data.startswith("bd_mode_tomorrow_"))
@@ -493,6 +429,68 @@ async def cb_set_minute(callback: CallbackQuery, state: FSMContext):
 
 
 # ===== Вспомогательные экраны =====
+
+async def _show_child_settings_screen(
+    callback: CallbackQuery,
+    user_config: UserConfig,
+    child_id: int,
+    child_index: int,
+):
+    """Показать экран настроек ДР для конкретного ребёнка (без callback.answer)."""
+    try:
+        children = await get_children_async(user_config.login, user_config.password)
+    except Exception:
+        await callback.message.edit_text("❌ Ошибка получения списка детей.")
+        return
+
+    if not children or child_index >= len(children):
+        await callback.message.edit_text("❌ Ребёнок не найден.")
+        return
+
+    child = children[child_index]
+    settings = await get_birthday_settings(callback.message.chat.id, child.id)
+
+    is_enabled = settings.get("enabled", False)
+    mode = settings.get("mode", "tomorrow")
+
+    buttons = []
+
+    btn_text = f"{'🔴' if is_enabled else '🟢'} Включить для {child.full_name}"
+    buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"bd_enable_{child.id}_{child_index}")])
+
+    if is_enabled:
+        mode_tomorrow = "✅ " if mode == "tomorrow" else ""
+        mode_weekly = "✅ " if mode == "weekly" else ""
+
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{mode_tomorrow}📅 Уведомлять о ДР завтра",
+                callback_data=f"bd_mode_tomorrow_{child.id}_{child_index}",
+            )
+        ])
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{mode_weekly}📋 Уведомлять о ДР на предстоящей неделе",
+                callback_data=f"bd_mode_weekly_{child.id}_{child_index}",
+            )
+        ])
+
+        desc = _get_mode_description(settings)
+        buttons.append([InlineKeyboardButton(
+            text=f"⏰ Текущее время: {desc}",
+            callback_data="bd_noop",
+        )])
+
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="bd_back_to_menu")])
+
+    status_text = "✅ Включено" if is_enabled else "❌ Выключено"
+    text = (
+        f"👦 <b>{child.full_name}</b> ({child.group})\n"
+        f"Статус: <b>{status_text}</b>"
+    )
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
 
 async def _show_birthday_menu(callback: CallbackQuery, user_config: UserConfig):
     """Показать главное меню настроек ДР (для callback)."""
