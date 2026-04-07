@@ -8,13 +8,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple
+from typing import Any, Dict, List, Optional, AsyncGenerator
 
 import aiosqlite
 from aiosqlite import Connection, Cursor
 
 from .config import config
-from .encryption import encrypt_password, decrypt_password
+from .encryption import encrypt_password
 from .services.cache import invalidate_children_cache
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class UserConfig:
 
     Пароль хранится только в зашифрованном виде (password_encrypted).
     Для получения расшифрованных учётных данных используйте
-    контекстный менеджер decrypted_credentials().
+    credentials.safe_decrypt().
     """
     chat_id: int
     login: Optional[str] = None
@@ -186,46 +186,6 @@ class DatabasePool:
 
 # Глобальный экземпляр пула
 db_pool = DatabasePool()
-
-
-# ===== Безопасное получение учётных данных =====
-
-async def decrypted_credentials(chat_id: int) -> AsyncGenerator[Tuple[str, str], None]:
-    """
-    Контекстный менеджер для безопасного получения расшифрованных учётных данных.
-    
-    Расшифровывает пароль только на время выполнения блока и затирает его
-    из памяти при выходе из контекста.
-    
-    Usage:
-        async with decrypted_credentials(chat_id) as (login, password):
-            children = await get_children_async(login, password)
-        # password больше не доступен в памяти
-    
-    Args:
-        chat_id: ID чата пользователя.
-        
-    Yields:
-        Кортеж (login, password) с расшифрованными учётными данными.
-        
-    Raises:
-        ValueError: Если пользователь не найден или учётные данные не настроены.
-    """
-    user = await get_user(chat_id)
-    if not user or not user.login or not user.password_encrypted:
-        raise ValueError(f"No credentials for user {chat_id}")
-    
-    try:
-        password = decrypt_password(user.password_encrypted)
-    except Exception as e:
-        raise ValueError(f"Failed to decrypt password for user {chat_id}: {e}")
-    
-    try:
-        yield user.login, password
-    finally:
-        # Затираем пароль из памяти
-        password = None
-        del password
 
 
 # ===== Операции с пользователями =====
