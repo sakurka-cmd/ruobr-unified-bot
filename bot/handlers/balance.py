@@ -8,9 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
 from ..config import config
+from ..states import ThresholdStates
 from ..database import (
     get_user, get_child_threshold, set_child_threshold,
     get_all_thresholds_for_chat, UserConfig, decrypted_credentials
@@ -310,66 +311,58 @@ async def cmd_foodtoday(message: Message, user_config: Optional[UserConfig] = No
 
 @router.message(Command("set_threshold"))
 @router.message(F.text == "💰 Порог баланса")
-async def cmd_set_threshold(message: Message, state: FSMContext, user_config: Optional[UserConfig] = None):
-    """Начало настройки порога баланса."""
+async def cmd_set_threshold(message: Message, user_config: Optional[UserConfig] = None):
+    """Начало настройки порога баланса — выбор ребёнка через inline-кнопки."""
     result = await require_authentication(message, user_config)
     if result is None:
         return
-    
+
     login, password, children = result
     thresholds = await get_all_thresholds_for_chat(message.chat.id)
-    
-    lines = ["⚙️ <b>Настройка порога баланса</b>\n"]
-    lines.append("Выберите ребёнка для изменения порога:\n")
-    
+
+    text_lines = ["\u2699\ufe0f <b>Настройка порога баланса</b>", ""]
+
+    buttons = []
     for idx, child in enumerate(children, 1):
         threshold = thresholds.get(child.id, config.default_balance_threshold)
-        lines.append(
-            f"{idx}. {child.full_name} ({child.group}) — "
-            f"порог {threshold:.0f} ₽"
+        text_lines.append(
+            f"{idx}. {child.full_name} ({child.group}) \u2014 порог {threshold:.0f} \u20bd"
         )
-    
-    lines.append("\n📝 Ответьте номером ребёнка.")
-    
-    await state.update_data(children=[{"id": c.id, "name": c.full_name, "group": c.group} for c in children])
-    await state.set_state(ThresholdStates.waiting_for_child_selection)
-    
-    await message.answer("\n".join(lines))
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{child.full_name} ({child.group}) \u2014 {threshold:.0f} \u20bd",
+                callback_data=f"thr_child_{child.id}_{idx-1}",
+            )
+        ])
 
+    buttons.append([InlineKeyboardButton(text="\u25c0\ufe0f Назад", callback_data="thr_back")])
 
-@router.message(ThresholdStates.waiting_for_child_selection)
-async def process_threshold_child(message: Message, state: FSMContext):
-    """Обработка выбора ребёнка для настройки порога."""
-    text = message.text.strip()
-    
-    if text in ["❌ Отмена", "/cancel", "◀️ Назад"]:
-        await state.clear()
-        await message.answer("❌ Настройка отменена.", reply_markup=get_main_keyboard())
-        return
-    
-    data = await state.get_data()
-    children = data.get("children", [])
-    
-    try:
-        idx = int(text)
-    except ValueError:
-        await message.answer("❌ Введите номер ребёнка (число).")
-        return
-    
-    if idx < 1 or idx > len(children):
-        await message.answer(f"❌ Неверный номер. Введите число от 1 до {len(children)}.")
-        return
-    
-    child = children[idx - 1]
-    current_threshold = await get_child_threshold(message.chat.id, child["id"])
-    
-    await state.update_data(selected_child_id=child["id"], selected_child_name=child["name"])
-    await state.set_state(ThresholdStates.waiting_for_threshold_value)
-    
     await message.answer(
-        f"👶 Выбран: <b>{child['name']}</b> ({child['group']})\n"
-        f"Текущий порог: <b>{current_threshold:.0f} ₽</b>\n\n"
-        f"Введите новый порог (число, например: 300):"
+        chr(10).join(text_lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data.startswith("thr_child_"))
+async def cb_threshold_child(callback: CallbackQuery, state: FSMContext):
+    """Выбран ребёнок для настройки порога — спрашиваем значение."""
+    parts = callback.data.split("_")
+    # thr_child_{child_id}_{child_index}
+    child_id = int(parts[2])
+    child_index = int(parts[3])
+
+    await callback.answer()
+
+    # Сохраняем child_id в state для следующего шага
+    await state.update_data(selected_child_id=child_id, selected_child_index=child_index)
+    await state.set_state(ThresholdStates.waiting_for_threshold_value)
+
+    current_threshold = await get_child_threshold(callback.message.chat.id, child_id)
+
+    await callback.message.answer(
+        f"\U0001f476 Выбран ребёнок.\n"
+        f"Текущий порог: <b>{current_threshold:.0f} \u20bd</b>\n\n"
+        f"\U0001f4dd Введите новый порог (число, например: 300):",
     )
 
 
@@ -377,46 +370,66 @@ async def process_threshold_child(message: Message, state: FSMContext):
 async def process_threshold_value(message: Message, state: FSMContext):
     """Обработка ввода значения порога."""
     text = message.text.strip()
-    
-    if text in ["❌ Отмена", "/cancel", "◀️ Назад"]:
+
+    if text in ["\u274c Отмена", "/cancel", "\u25c0\ufe0f Назад"]:
         await state.clear()
-        await message.answer("❌ Настройка отменена.", reply_markup=get_main_keyboard())
+        await message.answer("\u274c Настройка отменена.", reply_markup=get_main_keyboard())
         return
-    
+
+    if _is_navigation_command(text):
+        await state.clear()
+        return  # пусть обработает другой handler
+
     data = await state.get_data()
     child_id = data.get("selected_child_id")
-    child_name = data.get("selected_child_name", "Ребёнок")
-    
+
     if child_id is None:
         await state.clear()
-        await message.answer("❌ Ошибка. Начните заново с /set_threshold")
+        await message.answer("\u274c Ошибка. Начните заново с /set_threshold", reply_markup=get_main_keyboard())
         return
-    
+
     try:
         value = float(text.replace(",", "."))
     except ValueError:
-        await message.answer("❌ Введите число (например: 300).")
+        await message.answer("\u274c Введите число (например: 300).")
         return
-    
+
     if value < 0:
-        await message.answer("❌ Порог не может быть отрицательным.")
+        await message.answer("\u274c Порог не может быть отрицательным.")
         return
     if value > 10000:
-        await message.answer("❌ Порог слишком большой (максимум 10000 ₽).")
+        await message.answer("\u274c Порог слишком большой (максимум 10 000 \u20bd).")
         return
-    
+
     await set_child_threshold(message.chat.id, child_id, value)
-    
+
     from ..services.cache import threshold_cache
     threshold_cache.delete(f"{message.chat.id}:thresholds")
-    
+
     await state.clear()
-    
+
     await message.answer(
-        f"✅ <b>Порог установлен!</b>\n\n"
-        f"{child_name}: {value:.0f} ₽\n\n"
+        f"\u2705 <b>Порог установлен!</b>\n\n"
+        f"{value:.0f} \u20bd\n\n"
         f"Вы будете получать уведомления, когда баланс упадёт ниже этого значения.",
         reply_markup=get_main_keyboard()
     )
 
+
+@router.callback_query(F.data == "thr_back")
+async def cb_threshold_back(callback: CallbackQuery):
+    """Возврат в настройки."""
+    keyboard = get_settings_keyboard()
+    try:
+        await callback.message.edit_text(
+            "\u2699\ufe0f <b>Настройки</b>",
+            reply_markup=None,
+        )
+    except Exception:
+        pass
+    await callback.answer()
+    await callback.message.answer(
+        "\u2699\ufe0f <b>Настройки</b>",
+        reply_markup=keyboard,
+    )
 
