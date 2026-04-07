@@ -29,6 +29,24 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+def _is_navigation_command(text: str) -> bool:
+    """Проверить, является ли текст навигационной командой/кнопкой."""
+    NAV_BUTTONS = {
+        "🎂 Дни рождения", "💰 Порог баланса", "🔑 Изменить логин/пароль",
+        "🔔 Уведомления", "👤 Мой профиль", "◀️ Назад",
+        "💰 Баланс питания", "🍽 Питание сегодня", "📅 Расписание сегодня",
+        "📅 Расписание завтра", "📘 ДЗ на завтра", "⭐ Оценки сегодня",
+        "⚙️ Настройки", "ℹ️ Информация", "👥 Одноклассники",
+        "👩‍🏫 Учителя", "🎓 Доп. образование", "📋 Справка",
+        "❌ Отмена", "/cancel", "/start", "/set_login", "/balance",
+        "/ttoday", "/ttomorrow", "/hwtomorrow", "/markstoday", "/foodtoday",
+        "/set_threshold",
+    }
+    return text.strip() in NAV_BUTTONS
+
+
+
+
 
 def _extract_dish_names(dishes) -> list:
     """Извлечение названий блюд из списка."""
@@ -400,4 +418,5 @@ async def process_threshold_value(message: Message, state: FSMContext):
         f"Вы будете получать уведомления, когда баланс упадёт ниже этого значения.",
         reply_markup=get_main_keyboard()
     )
+
 

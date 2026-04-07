@@ -19,6 +19,21 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+def _is_navigation_command(text: str) -> bool:
+    """Проверить, является ли текст навигационной командой/кнопкой."""
+    NAV = {
+        "🎂 Дни рождения", "💰 Порог баланса", "🔑 Изменить логин/пароль",
+        "🔔 Уведомления", "👤 Мой профиль", "◀️ Назад",
+        "💰 Баланс питания", "🍽 Питание сегодня", "📅 Расписание сегодня",
+        "📅 Расписание завтра", "📘 ДЗ на завтра", "⭐ Оценки сегодня",
+        "⚙️ Настройки", "ℹ️ Информация", "👥 Одноклассники",
+        "👩‍🏫 Учителя", "🎓 Доп. образование", "📋 Справка",
+        "❌ Отмена", "/cancel", "/start", "/set_login", "/balance",
+        "/ttoday", "/ttomorrow", "/hwtomorrow", "/markstoday", "/foodtoday",
+        "/set_threshold",
+    }
+    return text.strip() in NAV
+
 
 # ===== Клавиатуры =====
 
@@ -115,6 +130,11 @@ async def cmd_set_login(message: Message, state: FSMContext):
 async def process_login(message: Message, state: FSMContext):
     text = message.text.strip()
     
+    # Навигационные команды — сбрасываем FSM
+    if _is_navigation_command(text):
+        await state.clear()
+        return
+    
     # Проверка отмены
     if text == "❌ Отмена" or text == "/cancel":
         await state.clear()
@@ -141,6 +161,11 @@ async def process_login(message: Message, state: FSMContext):
 @router.message(LoginStates.waiting_for_password)
 async def process_password(message: Message, state: FSMContext):
     password = message.text.strip()
+    
+    # Навигационные команды — сбрасываем FSM
+    if _is_navigation_command(password):
+        await state.clear()
+        return
     
     # Проверка отмены
     if password == "❌ Отмена" or password == "/cancel":
@@ -1046,5 +1071,6 @@ async def cb_toggle_birthday(callback: CallbackQuery, user_config: Optional[User
     
     updated = await get_user(callback.message.chat.id)
     await callback.message.edit_reply_markup(reply_markup=get_notification_keyboard(updated))
+
 
 
