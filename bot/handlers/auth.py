@@ -334,7 +334,7 @@ async def show_classmates(message: Message, login: str, password: str, child_ind
                     age = datetime.now().year - bd.year
                     if (datetime.now().month, datetime.now().day) < (bd.month, bd.day):
                         age -= 1
-                except:
+                except (ValueError, TypeError, KeyError):
                     bd_str = c.birth_date
                     age = "?"
             else:
@@ -428,13 +428,13 @@ def _format_program(p) -> str:
         try:
             d = p.start_date.split("-")
             dates.append(f"{d[2]}.{d[1]}.{d[0]}")
-        except:
+        except (ValueError, TypeError, IndexError):
             dates.append(p.start_date)
     if p.end_date and p.end_date != "None":
         try:
             d = p.end_date.split("-")
             dates.append(f"{d[2]}.{d[1]}.{d[0]}")
-        except:
+        except (ValueError, TypeError, IndexError):
             dates.append(p.end_date)
     if dates:
         sep = " \u2014 " if len(dates) == 2 else ""
@@ -758,7 +758,7 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
                     age = datetime.now().year - bd.year
                     if (datetime.now().month, datetime.now().day) < (bd.month, bd.day):
                         age -= 1
-                except:
+                except (ValueError, TypeError, KeyError):
                     bd_str = c.birth_date
                     age = "?"
             else:
@@ -783,8 +783,8 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
         logger.error(f"Error in cb_classmates_select: {e}")
         try:
             await callback.message.edit_text(f"❌ Ошибка: {e}")
-        except:
-            pass
+        except Exception:
+            logger.debug("Failed to send error message to user")
 
 
 @router.callback_query(F.data.startswith("info_teachers_"))
@@ -859,8 +859,8 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
         logger.error(f"Error in cb_teachers_select: {e}")
         try:
             await callback.message.edit_text(f"❌ Ошибка: {e}")
-        except:
-            pass
+        except Exception:
+            logger.debug("Failed to send error message to user")
 
 
 @router.callback_query(F.data.startswith("info_achievements_"))
@@ -919,8 +919,8 @@ async def cb_achievements_select(callback: CallbackQuery, user_config: Optional[
         logger.error(f"Error in cb_achievements_select: {e}")
         try:
             await callback.message.edit_text(f"❌ Ошибка: {e}")
-        except:
-            pass
+        except Exception:
+            logger.debug("Failed to send error message to user")
 
 
 @router.message(F.text == "◀️ Назад")
