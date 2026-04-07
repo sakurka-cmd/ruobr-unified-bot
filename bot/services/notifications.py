@@ -2,6 +2,7 @@
 Фоновые задачи для уведомлений.
 """
 import asyncio
+import random
 import time
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -135,7 +136,9 @@ class NotificationService:
     """
 
     MARKS_CHECK_DAYS = 14
-    BALANCE_FOOD_CHECK_INTERVAL = 1800  # 30 minutes  # Проверять оценки за последние 14 дней
+    MARKS_CHECK_INTERVAL = 900  # 15 minutes
+    BALANCE_FOOD_CHECK_INTERVAL = 1800  # 30 minutes
+    _JITTER_RANGE = 300  # +-5 min per-user stagger
 
     def __init__(self, bot: Bot):
         self._bot = bot
@@ -143,6 +146,8 @@ class NotificationService:
         self._prev_balances: Dict[int, Dict[int, float]] = {}
         self._last_balance_check: Dict[int, float] = {}
         self._last_food_check: Dict[int, float] = {}
+        self._last_marks_check: Dict[int, float] = {}
+        self._user_jitter: Dict[int, int] = {}
         self._last_birthday_check_hour: Dict[int, int] = {}
         self._first_run = True  # Флаг первого запуска
 
@@ -259,6 +264,15 @@ class NotificationService:
         tasks = [process_with_limit(user) for user in users]
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    def _get_jitter(self, chat_id: int) -> int:
+        """
+        Период-пользовательский случайный сдвиг для разброски запросов.
+        Фиксирован на всё жизнь процесса.
+        """
+        if chat_id not in self._user_jitter:
+            self._user_jitter[chat_id] = random.randint(0, self._JITTER_RANGE)
+        return self._user_jitter[chat_id]
+
     async def _process_user(self, user: UserConfig) -> None:
         """Обработка уведомлений для одного пользователя."""
         if not user.login or not user.password_encrypted:
@@ -286,9 +300,10 @@ class NotificationService:
         # Получаем данные о питании только если баланс/еда проверяются в этом цикле
         now = time.time()
         need_food = False
-        if user.enabled and (now - self._last_balance_check.get(user.chat_id, 0) >= self.BALANCE_FOOD_CHECK_INTERVAL):
+        jitter = self._get_jitter(user.chat_id)
+        if user.enabled and (now - self._last_balance_check.get(user.chat_id, 0) >= self.BALANCE_FOOD_CHECK_INTERVAL + jitter):
             need_food = True
-        if user.food_enabled and (now - self._last_food_check.get(user.chat_id, 0) >= self.BALANCE_FOOD_CHECK_INTERVAL):
+        if user.food_enabled and (now - self._last_food_check.get(user.chat_id, 0) >= self.BALANCE_FOOD_CHECK_INTERVAL + jitter):
             need_food = True
 
         food_info: Dict[int, FoodInfo] = {}
@@ -302,19 +317,23 @@ class NotificationService:
         if user.enabled:
             now = time.time()
             last_check = self._last_balance_check.get(user.chat_id, 0)
-            if now - last_check >= self.BALANCE_FOOD_CHECK_INTERVAL:
+            if now - last_check >= self.BALANCE_FOOD_CHECK_INTERVAL + self._get_jitter(user.chat_id):
                 self._last_balance_check[user.chat_id] = now
                 await self._check_balance_notifications(user, children, food_info)
 
-        # Уведомления об оценках
+        # Уведомления об оценках (проверка раз в 15 мин + jitter)
         if user.marks_enabled:
-            await self._check_marks_notifications(user, children, login, password)
+            now = time.time()
+            last_check = self._last_marks_check.get(user.chat_id, 0)
+            if now - last_check >= self.MARKS_CHECK_INTERVAL + self._get_jitter(user.chat_id):
+                self._last_marks_check[user.chat_id] = now
+                await self._check_marks_notifications(user, children, login, password)
 
         # Уведомления о питании (проверка раз в 30 минут)
         if user.food_enabled:
             now = time.time()
             last_check = self._last_food_check.get(user.chat_id, 0)
-            if now - last_check >= self.BALANCE_FOOD_CHECK_INTERVAL:
+            if now - last_check >= self.BALANCE_FOOD_CHECK_INTERVAL + self._get_jitter(user.chat_id):
                 self._last_food_check[user.chat_id] = now
                 await self._check_food_notifications(user, children, food_info)
 
