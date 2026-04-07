@@ -770,6 +770,12 @@ async def get_food_for_children(
         logger.error(f"Error creating client for food: {e}")
         return food_info
 
+    # Re-raise first error if ALL tasks failed
+    errors = [r for r in results if isinstance(r, RuobrError)]
+    if errors and len(errors) == len(results):
+        logger.error(f"All food requests failed for {len(children)} children")
+        raise errors[0]
+
     for result in results:
         if isinstance(result, Exception):
             logger.error(f"Error fetching food info: {result}")
@@ -819,6 +825,12 @@ async def get_timetable_for_children(
     except (AuthenticationError, NetworkError) as e:
         logger.error(f"Error creating client for timetable: {e}")
         return timetable
+
+    # Re-raise first error if ALL tasks failed
+    errors = [r for r in results if isinstance(r, RuobrError)]
+    if errors and len(errors) == len(results):
+        logger.error(f"All timetable requests failed for {len(children)} children")
+        raise errors[0]
 
     for result in results:
         if isinstance(result, Exception):

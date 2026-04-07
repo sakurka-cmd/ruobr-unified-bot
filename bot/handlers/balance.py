@@ -19,7 +19,8 @@ from ..database import (
 )
 from ..services import (
     Child, FoodInfo, get_children_async, get_food_for_children,
-    get_timetable_for_children, RuobrError, invalidate_user_cache
+    get_timetable_for_children, RuobrError, NetworkError, AuthenticationError,
+    invalidate_user_cache
 )
 from ..utils.formatters import (
     format_balance, format_date, truncate_text,
@@ -63,6 +64,18 @@ async def require_authentication(
     
     try:
         children = await get_children_async(login, password)
+    except NetworkError:
+        logger.error(f"Network error for user {message.chat.id}")
+        await message.answer(
+            "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже."
+        )
+        return None
+    except AuthenticationError:
+        logger.error(f"Authentication error for user {message.chat.id}")
+        await message.answer(
+            "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль."
+        )
+        return None
     except RuobrError as e:
         logger.error(f"Ruobr API error for user {message.chat.id}: {e}")
         await message.answer(f"❌ Ошибка доступа к Ruobr: {e}")
@@ -115,6 +128,16 @@ async def cmd_balance(message: Message, user_config: Optional[UserConfig] = None
         
         await status_msg.edit_text("\n".join(lines))
         
+    except NetworkError:
+        logger.error(f"Network error getting balance for user {message.chat.id}")
+        await status_msg.edit_text(
+            "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже."
+        )
+    except AuthenticationError:
+        logger.error(f"Auth error getting balance for user {message.chat.id}")
+        await status_msg.edit_text(
+            "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль."
+        )
     except Exception as e:
         logger.error(f"Error getting balance for user {message.chat.id}: {e}")
         await status_msg.edit_text(
@@ -225,6 +248,16 @@ async def cmd_foodtoday(message: Message, user_config: Optional[UserConfig] = No
                 # Остальных — отдельными сообщениями
                 await message.answer(text)
             
+    except NetworkError:
+        logger.error(f"Network error getting food for user {message.chat.id}")
+        await status_msg.edit_text(
+            "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже."
+        )
+    except AuthenticationError:
+        logger.error(f"Auth error getting food for user {message.chat.id}")
+        await status_msg.edit_text(
+            "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль."
+        )
     except Exception as e:
         logger.error(f"Error getting food today for user {message.chat.id}: {e}")
         await status_msg.edit_text(

@@ -15,7 +15,7 @@ from ..config import config
 from ..database import UserConfig
 from ..services import (
     Child, Lesson, get_children_async, get_timetable_for_children,
-    RuobrError
+    RuobrError, NetworkError, AuthenticationError
 )
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
@@ -140,6 +140,12 @@ async def cmd_ttoday(message: Message, user_config: Optional[UserConfig] = None)
     except asyncio.TimeoutError:
         logger.error(f"Timeout getting timetable for user {message.chat.id}")
         await safe_edit_message(status_msg, "⏱ Превышено время ожидания. Попробуйте позже.")
+    except NetworkError:
+        logger.error(f"Network error getting timetable for user {message.chat.id}")
+        await safe_edit_message(status_msg, "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже.")
+    except AuthenticationError:
+        logger.error(f"Auth error getting timetable for user {message.chat.id}")
+        await safe_edit_message(status_msg, "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль.")
     except TelegramNetworkError as e:
         logger.error(f"Network error for user {message.chat.id}: {e}")
         await safe_edit_message(status_msg, "📡 Ошибка сети. Проверьте подключение.")
@@ -192,6 +198,12 @@ async def cmd_ttomorrow(message: Message, user_config: Optional[UserConfig] = No
     except asyncio.TimeoutError:
         logger.error(f"Timeout getting timetable for user {message.chat.id}")
         await safe_edit_message(status_msg, "⏱ Превышено время ожидания. Попробуйте позже.")
+    except NetworkError:
+        logger.error(f"Network error getting timetable for user {message.chat.id}")
+        await safe_edit_message(status_msg, "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже.")
+    except AuthenticationError:
+        logger.error(f"Auth error getting timetable for user {message.chat.id}")
+        await safe_edit_message(status_msg, "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль.")
     except TelegramNetworkError as e:
         logger.error(f"Network error for user {message.chat.id}: {e}")
         await safe_edit_message(status_msg, "📡 Ошибка сети. Проверьте подключение.")
@@ -331,6 +343,12 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
     except asyncio.TimeoutError:
         logger.error(f"Timeout getting homework for user {message.chat.id}")
         await safe_edit_message(status_msg, "⏱ Превышено время ожидания. Попробуйте позже.")
+    except NetworkError:
+        logger.error(f"Network error getting homework for user {message.chat.id}")
+        await safe_edit_message(status_msg, "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже.")
+    except AuthenticationError:
+        logger.error(f"Auth error getting homework for user {message.chat.id}")
+        await safe_edit_message(status_msg, "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль.")
     except TelegramNetworkError as e:
         logger.error(f"Network error for user {message.chat.id}: {e}")
         await safe_edit_message(status_msg, "📡 Ошибка сети. Проверьте подключение.")
@@ -391,6 +409,12 @@ async def cmd_markstoday(message: Message, user_config: Optional[UserConfig] = N
     except asyncio.TimeoutError:
         logger.error(f"Timeout getting marks for user {message.chat.id}")
         await safe_edit_message(status_msg, "⏱ Превышено время ожидания. Попробуйте позже.")
+    except NetworkError:
+        logger.error(f"Network error getting marks for user {message.chat.id}")
+        await safe_edit_message(status_msg, "⚠️ Сервис ruobr.ru недоступен. Попробуйте позже.")
+    except AuthenticationError:
+        logger.error(f"Auth error getting marks for user {message.chat.id}")
+        await safe_edit_message(status_msg, "❌ Ошибка авторизации в Ruobr. Проверьте логин и пароль.")
     except TelegramNetworkError as e:
         logger.error(f"Network error for user {message.chat.id}: {e}")
         await safe_edit_message(status_msg, "📡 Ошибка сети. Проверьте подключение.")
