@@ -11,12 +11,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
 from ..config import config
+from ..credentials import safe_decrypt
 from ..states import ThresholdStates
 from ..database import (
     get_user, get_child_threshold, set_child_threshold,
-    get_all_thresholds_for_chat, UserConfig, decrypted_credentials
+    get_all_thresholds_for_chat, UserConfig
 )
-from ..states import ThresholdStates
 from ..services import (
     Child, FoodInfo, get_children_async, get_food_for_children,
     get_timetable_for_children, RuobrError, invalidate_user_cache
@@ -107,7 +107,7 @@ async def require_authentication(
     """
     Проверка аутентификации пользователя.
     
-    Использует decrypted_credentials() для безопасного получения пароля.
+    Использует safe_decrypt() для безопасного получения пароля.
     Пароль расшифровывается только на время проверки и сразу затирается.
     
     Returns:
@@ -122,11 +122,11 @@ async def require_authentication(
         )
         return None
     
-    try:
-        login, password = await _decrypt_user_credentials(user_config)
-    except ValueError as e:
-        logger.error(f"Credential error for user {message.chat.id}: {e}")
-        await message.answer("❌ Ошибка расшифровки учётных данных. Настройте заново: /set_login")
+    login, password = safe_decrypt(user_config)
+    if not login:
+        await message.answer(
+            "❌ Сначала настройте учётные данные командой /set_login"
+        )
         return None
     
     try:
@@ -142,23 +142,6 @@ async def require_authentication(
     
     return login, password, children
 
-
-async def _decrypt_user_credentials(user_config: UserConfig) -> Tuple[str, str]:
-    """
-    Расшифровка учётных данных пользователя.
-    Пароль живёт в памяти только пока нужен.
-    """
-    if not user_config.password_encrypted:
-        raise ValueError(f"No encrypted password for user {user_config.chat_id}")
-    
-    from ..encryption import decrypt_password
-    password = decrypt_password(user_config.password_encrypted)
-    try:
-        return user_config.login, password
-    finally:
-        # Затираем пароль
-        password = "\x00" * len(password)
-        del password
 
 
 # ===== Баланс питания =====

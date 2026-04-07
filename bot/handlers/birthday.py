@@ -13,8 +13,8 @@ from aiogram.types import (
     CallbackQuery,
 )
 
-from ..encryption import decrypt_password
 
+from ..credentials import safe_decrypt
 from ..database import (
     get_user,
     create_or_update_user,
@@ -40,20 +40,6 @@ WEEKDAY_NAMES = [
 WEEKDAY_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 
-
-def _decrypt_creds(user_config):
-    """
-    Safe decryption of user credentials.
-    Returns (login, password) or (None, None) on error.
-    """
-    if not user_config or not user_config.password_encrypted:
-        return None, None
-    try:
-        password = decrypt_password(user_config.password_encrypted)
-        return user_config.login, password
-    except Exception as e:
-        logger.error(f"Error decrypting credentials: {e}")
-        return None, None
 
 
 
@@ -105,7 +91,7 @@ async def cmd_birthday_settings(
 
     # Получаем список детей
     try:
-        _login, _password = _decrypt_creds(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)
@@ -480,7 +466,7 @@ async def _show_child_settings_screen(
 ):
     """Показать экран настроек ДР для конкретного ребёнка (без callback.answer)."""
     try:
-        _login, _password = _decrypt_creds(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)
@@ -544,7 +530,7 @@ async def _show_birthday_menu(callback: CallbackQuery, user_config: UserConfig):
         return
 
     try:
-        _login, _password = _decrypt_creds(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)

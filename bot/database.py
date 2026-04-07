@@ -189,7 +189,6 @@ db_pool = DatabasePool()
 
 # ===== Безопасное получение учётных данных =====
 
-@asynccontextmanager
 async def decrypted_credentials(chat_id: int) -> AsyncGenerator[Tuple[str, str], None]:
     """
     Контекстный менеджер для безопасного получения расшифрованных учётных данных.

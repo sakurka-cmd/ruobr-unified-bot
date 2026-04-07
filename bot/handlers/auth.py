@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from ..config import config
-from ..encryption import decrypt_password
+from ..credentials import safe_decrypt
 from ..database import get_user, create_or_update_user, UserConfig
 from ..states import LoginStates
 from ..services import get_children_async, AuthenticationError, get_classmates_for_child, get_achievements_for_child, get_certificate_for_child, get_guide_for_child
@@ -34,23 +34,6 @@ def _is_navigation_command(text: str) -> bool:
     }
     return text.strip() in NAV
 
-
-def _safe_login_password(user_config):
-    """
-    Safe decryption of user credentials.
-    Returns (login, password) or (None, None) on error.
-    """
-    if not user_config or not user_config.password_encrypted:
-        return None, None
-    try:
-        password = decrypt_password(user_config.password_encrypted)
-        return user_config.login, password
-    except Exception as e:
-        logger.error(f"Error decrypting credentials: {e}")
-        return None, None
-
-
-# ===== Клавиатуры =====
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -287,7 +270,7 @@ def get_child_select_keyboard(children, action: str) -> InlineKeyboardMarkup:
 async def get_children_or_select(message: Message, user_config: UserConfig, action: str):
     """Получить детей или показать выбор"""
     try:
-        _login, _password = _safe_login_password(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)
@@ -296,7 +279,7 @@ async def get_children_or_select(message: Message, user_config: UserConfig, acti
             return None
         
         if len(children) == 1:
-            return (children, 0)  # Один ребенок - возвращаем его индекс
+            return (children, 0, _login, _password)
         
         # Несколько детей - показываем выбор
         await message.answer(
@@ -634,8 +617,8 @@ async def btn_classmates(message: Message, user_config: Optional[UserConfig] = N
     
     result = await get_children_or_select(message, user_config, "classmates")
     if result:
-        children, idx = result
-        await show_classmates(message, _login, _password, idx, children[idx].full_name)
+        children, idx, login, password = result
+        await show_classmates(message, login, password, idx, children[idx].full_name)
 
 
 @router.message(F.text == "👩‍🏫 Учителя")
@@ -646,8 +629,8 @@ async def btn_teachers(message: Message, user_config: Optional[UserConfig] = Non
     
     result = await get_children_or_select(message, user_config, "teachers")
     if result:
-        children, idx = result
-        await show_teachers(message, _login, _password, idx, children[idx].full_name)
+        children, idx, login, password = result
+        await show_teachers(message, login, password, idx, children[idx].full_name)
 
 
 @router.message(F.text == "🎓 Доп. образование")
@@ -658,8 +641,8 @@ async def btn_achievements(message: Message, user_config: Optional[UserConfig] =
     
     result = await get_children_or_select(message, user_config, "achievements")
     if result:
-        children, idx = result
-        await show_achievements(message, _login, _password, idx, children[idx].full_name)
+        children, idx, login, password = result
+        await show_achievements(message, login, password, idx, children[idx].full_name)
 
 
 @router.message(F.text == "📋 Справка")
@@ -729,7 +712,7 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
         # Показываем loading
         await callback.message.edit_text("🔄 Загрузка одноклассников...")
         
-        _login, _password = _safe_login_password(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)
@@ -829,7 +812,7 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
         idx = int(callback.data.split("_")[-1])
         await callback.message.edit_text("🔄 Загрузка учителей...")
         
-        _login, _password = _safe_login_password(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)
@@ -907,7 +890,7 @@ async def cb_achievements_select(callback: CallbackQuery, user_config: Optional[
         idx = int(callback.data.split("_")[-1])
         await callback.message.edit_text("🔄 Загрузка данных о доп. образовании...")
         
-        _login, _password = _safe_login_password(user_config)
+        _login, _password = safe_decrypt(user_config)
         if not _login:
             return
         children = await get_children_async(_login, _password)
