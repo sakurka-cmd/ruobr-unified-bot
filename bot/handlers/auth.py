@@ -1002,16 +1002,18 @@ async def cb_profile_link_vk(callback: CallbackQuery, user_config: Optional[User
         text = (
             "🔗 <b>Привязка VK аккаунта</b>\n\n"
             f"1. Откройте <a href=\"{vk_link}\">VK бот</a>\n"
-            f"2. Отправьте команду:\n"
-            f"   <code>/link_tg {code}</code>\n\n"
+            "2. Если не начали — отправьте /start\n"
+            "3. Отправьте код:\n"
+            f"   <code>{code}</code>\n\n"
             "⏰ Код действителен 10 минут."
         )
     else:
         text = (
             "🔗 <b>Привязка VK аккаунта</b>\n\n"
-            f"1. Откройте VK бот\n"
-            f"2. Отправьте команду:\n"
-            f"   <code>/link_tg {code}</code>\n\n"
+            "1. Найдите VK бот в поиске VK\n"
+            "2. Если не начали — отправьте /start\n"
+            "3. Отправьте код:\n"
+            f"   <code>{code}</code>\n\n"
             "⏰ Код действителен 10 минут."
         )
     

@@ -116,6 +116,8 @@ async def run_vk_bot(vk_token: str):
         @vk_labeler.message(text="/start")
         async def vk_start(message: Message):
             user = await get_user(peer_id=message.peer_id)
+            if not user:
+                user = await create_or_update_user(peer_id=message.peer_id)
             is_auth = user and user.login
             text = ("👋 Школьный бот — ВК версия\n\n")
             if not is_auth:
@@ -158,7 +160,9 @@ async def run_vk_bot(vk_token: str):
         async def vk_profile(message: Message):
             user = await get_user(peer_id=message.peer_id)
             if not user:
-                await message.answer("❌ Профиль не найден. Используйте /start")
+                user = await create_or_update_user(peer_id=message.peer_id)
+            if not user:
+                await message.answer("❌ Ошибка создания профиля. Попробуйте /start")
                 return
             status = "✅ Настроен" if user.login and user.password_encrypted else "❌ Не настроен"
             tg_linked = user.chat_id is not None
@@ -378,6 +382,8 @@ async def run_vk_bot(vk_token: str):
                         tg_user = await get_user_by_id(tg_user_id)
                         if tg_user and tg_user.chat_id:
                             current = await get_user(peer_id=message.peer_id)
+                            if not current:
+                                current = await create_or_update_user(peer_id=message.peer_id)
                             if current and current.id:
                                 await link_accounts(current.id, chat_id=tg_user.chat_id)
                                 await message.answer(
@@ -386,7 +392,7 @@ async def run_vk_bot(vk_token: str):
                                     keyboard=get_vk_main_keyboard()
                                 )
                                 return
-                    await message.answer("❌ Этот код предназначен для другого мессенджера или уже использован.")
+                    await message.answer("❌ Не удалось привязать. Попробуйте ещё раз.")
                 # Не 8-значный код — идём дальше в FSM
 
             state = await get_vk_fsm_state(message.peer_id)
@@ -422,9 +428,11 @@ async def run_vk_bot(vk_token: str):
                     await message.answer("⚠️ TG аккаунт найден, но привязка не удалась.")
                     return
                 current = await get_user(peer_id=message.peer_id)
+                if not current:
+                    current = await create_or_update_user(peer_id=message.peer_id)
                 if not current or not current.id:
                     await clear_vk_fsm_state(message.peer_id)
-                    await message.answer("❌ Профиль не найден.")
+                    await message.answer("❌ Ошибка привязки.")
                     return
                 await link_accounts(current.id, chat_id=tg_user.chat_id)
                 await clear_vk_fsm_state(message.peer_id)
