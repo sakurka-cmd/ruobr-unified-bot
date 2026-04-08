@@ -84,7 +84,9 @@ async def run_vk_bot(vk_token: str):
 
         from bot.database import (
             get_user, get_all_thresholds_for_chat, create_or_update_user,
-            create_link_code, consume_link_code, link_accounts, unlink_channel
+            create_link_code, consume_link_code, link_accounts, unlink_channel,
+            get_birthday_settings, set_birthday_settings, get_all_birthday_settings,
+            save_vk_fsm_state, get_vk_fsm_state, clear_vk_fsm_state,
         )
         from bot.services import get_children_async, get_food_for_children, get_timetable_for_children, AuthenticationError, get_classmates_for_child, get_achievements_for_child, get_certificate_for_child, get_guide_for_child
         from bot.utils.formatters import format_balance, format_food_visit, format_date, format_lesson, format_mark, format_weekday, truncate_text, clean_html_text, has_meaningful_text, extract_homework_files
@@ -713,20 +715,115 @@ async def run_vk_bot(vk_token: str):
             await save_vk_fsm_state(message.peer_id, "waiting_threshold_child", data=str(len(children)))
             await message.answer("\n".join(lines))
 
+        # ===== Дни рождения (FSM) =====
+        VK_BD_WEEKDAY_NAMES = [
+            "0 — Понедельник", "1 — Вторник", "2 — Среда",
+            "3 — Четверг", "4 — Пятница", "5 — Суббота", "6 — Воскресенье",
+        ]
+
+        def get_vk_birthday_menu_keyboard():
+            return (
+                Keyboard(one_time=False, inline=False)
+                .add(Text("📋 Настроить ребёнка"), color=KeyboardButtonColor.PRIMARY)
+                .add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+            ).get_json()
+
+        def get_vk_birthday_child_keyboard(is_enabled, mode_desc):
+            k = (
+                Keyboard(one_time=False, inline=False)
+                .add(Text(f"{'🔴' if is_enabled else '🟢'} Включить/выключить"), color=KeyboardButtonColor.PRIMARY)
+                .row()
+                .add(Text("📅 Режим: завтра"), color=KeyboardButtonColor.PRIMARY)
+                .add(Text("📋 Режим: еженедельно"), color=KeyboardButtonColor.PRIMARY)
+                .row()
+                .add(Text("⏰ Изменить время"), color=KeyboardButtonColor.SECONDARY)
+                .row()
+                .add(Text("◀️ Назад к списку"), color=KeyboardButtonColor.NEGATIVE)
+            )
+            return k.get_json()
+
         @vk_labeler.message(text="🎂 Дни рождения")
         async def vk_birthday(message: Message):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            enabled = getattr(user, 'vk_birthday_enabled', False)
-            status = "✅ включены" if enabled else "❌ выключены"
-            text = (
-                f"🎂 Настройки уведомлений о днях рождения\n\n"
-                f"Статус: {status}\n\n"
-                f"Уведомления о днях рождения одноклассников "
-                f"будут приходить в VK.\n\n"
-                f"Для включения/выключения:\n"
-                f"🔔 Уведомления → Дни рождения"
-            )
-            await message.answer(text, keyboard=get_vk_settings_keyboard())
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+
+            global_status = "✅ ВКЛ" if getattr(user, 'vk_birthday_enabled', False) else "❌ ВЫКЛ"
+            all_settings = await get_all_birthday_settings(user.id)
+            settings_map = {s["child_id"]: s for s in all_settings}
+
+            lines = [f"🎂 Уведомления о днях рождения\n\nГлобальное: {global_status}\n"]
+            for i, child in enumerate(children, 1):
+                cs = settings_map.get(child.id)
+                if cs and cs.get("enabled"):
+                    mode = cs.get("mode", "tomorrow")
+                    h = cs.get("notify_hour", 7)
+                    m = cs.get("notify_minute", 0)
+                    if mode == "weekly":
+                        wd = cs.get("notify_weekday", 1)
+                        wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
+                        desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
+                    else:
+                        desc = f"Ежедневно ({h:02d}:{m:02d})"
+                    lines.append(f"{i}. {child.full_name}: ✅ {desc}")
+                else:
+                    lines.append(f"{i}. {child.full_name}: ❌ выкл")
+
+            lines.append(f"\nВведите номер ребёнка (1-{len(children)}) для настройки:")
+            lines.append("❌ Отмена — для выхода")
+            await save_vk_fsm_state(message.peer_id, "bd_choose_child", data=str(len(children)))
+            await message.answer("\n".join(lines), keyboard=get_vk_birthday_menu_keyboard())
+
+        @vk_labeler.message(text="📋 Настроить ребёнка")
+        async def vk_bd_reshow(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+            global_status = "✅ ВКЛ" if getattr(user, 'vk_birthday_enabled', False) else "❌ ВЫКЛ"
+            all_settings = await get_all_birthday_settings(user.id)
+            settings_map = {s["child_id"]: s for s in all_settings}
+            lines = [f"🎂 Уведомления о днях рождения\n\nГлобальное: {global_status}\n"]
+            for i, child in enumerate(children, 1):
+                cs = settings_map.get(child.id)
+                if cs and cs.get("enabled"):
+                    mode = cs.get("mode", "tomorrow")
+                    h = cs.get("notify_hour", 7)
+                    m = cs.get("notify_minute", 0)
+                    if mode == "weekly":
+                        wd = cs.get("notify_weekday", 1)
+                        wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
+                        desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
+                    else:
+                        desc = f"Ежедневно ({h:02d}:{m:02d})"
+                    lines.append(f"{i}. {child.full_name}: ✅ {desc}")
+                else:
+                    lines.append(f"{i}. {child.full_name}: ❌ выкл")
+            lines.append(f"\nВведите номер ребёнка (1-{len(children)}):")
+            lines.append("❌ Отмена — для выхода")
+            await save_vk_fsm_state(message.peer_id, "bd_choose_child", data=str(len(children)))
+            await message.answer("\n".join(lines), keyboard=get_vk_birthday_menu_keyboard())
 
         # FSM: ввод кода привязки от TG
         @vk_labeler.message(text="/enter_code")
@@ -878,6 +975,256 @@ async def run_vk_bot(vk_token: str):
                     f"✅ Порог установлен!\n\n"
                     f"{child.full_name} ({child.group}): {value:.0f} ₽\n\n"
                     f"Вы будете получать уведомления, когда баланс упадёт ниже этого значения.",
+                    keyboard=get_vk_settings_keyboard()
+                )
+
+            elif state_name == "bd_choose_child":
+                max_children = int(state.get("data") or "1")
+                try:
+                    child_num = int(text.strip())
+                except ValueError:
+                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
+                    return
+                if child_num < 1 or child_num > max_children:
+                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
+                    return
+                # Загружаем данные ребёнка
+                user = await get_user(peer_id=message.peer_id)
+                if not user or not user.login:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка. Попробуйте /set_login", keyboard=get_vk_settings_keyboard())
+                    return
+                from bot.credentials import safe_decrypt
+                login, password = safe_decrypt(user)
+                try:
+                    children = await get_children_async(login, password)
+                except Exception:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка авторизации.", keyboard=get_vk_settings_keyboard())
+                    return
+                if not children or child_num > len(children):
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ребёнок не найден.", keyboard=get_vk_settings_keyboard())
+                    return
+                child = children[child_num - 1]
+                settings = await get_birthday_settings(user.id, child.id)
+                is_enabled = settings.get("enabled", False)
+                mode = settings.get("mode", "tomorrow")
+                h = settings.get("notify_hour", 7)
+                m = settings.get("notify_minute", 0)
+                if mode == "weekly":
+                    wd = settings.get("notify_weekday", 1)
+                    wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
+                    mode_desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
+                else:
+                    mode_desc = f"Ежедневно ({h:02d}:{m:02d})"
+                status = "✅ Включено" if is_enabled else "❌ Выключено"
+                lines = [
+                    f"👦 {child.full_name} ({child.group})",
+                    f"Статус: {status}",
+                    f"Режим: {mode_desc}",
+                    "",
+                    "Нажмите кнопку ниже или введите число:",
+                    "1 — Включить/выключить",
+                    "2 — Режим: завтра",
+                    "3 — Режим: еженедельно",
+                    "4 — Изменить время",
+                ]
+                await save_vk_fsm_state(message.peer_id, "bd_child_menu",
+                    data=f"{child.id}|{child_num - 1}|{child.full_name}|{child.group}")
+                await message.answer("\n".join(lines), keyboard=get_vk_birthday_child_keyboard(is_enabled, mode_desc))
+
+            elif state_name == "bd_child_menu":
+                parts_data = state.get("data", "").split("|")
+                child_id = int(parts_data[0])
+                child_idx = int(parts_data[1])
+                child_name = parts_data[2] if len(parts_data) > 2 else "Ребёнок"
+                child_group = parts_data[3] if len(parts_data) > 3 else ""
+                settings = await get_birthday_settings(
+                    (await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)).id,
+                    child_id
+                )
+                is_enabled = settings.get("enabled", False)
+                if text in ("1", "🟢 Включить/выключить", "🔴 Включить/выключить"):
+                    new_enabled = not is_enabled
+                    await set_birthday_settings(
+                        user_id=(await get_user(peer_id=message.peer_id)).id,
+                        child_id=child_id,
+                        enabled=new_enabled,
+                        mode=settings.get("mode", "tomorrow"),
+                        notify_weekday=settings.get("notify_weekday", 1),
+                        notify_hour=settings.get("notify_hour", 7),
+                        notify_minute=settings.get("notify_minute", 0),
+                    )
+                    # Если включили — включаем глобально
+                    if new_enabled:
+                        user = await get_user(peer_id=message.peer_id)
+                        if not getattr(user, 'vk_birthday_enabled', False):
+                            await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
+                    status = "✅ Включено" if new_enabled else "❌ Выключено"
+                    await message.answer(f"{'✅ Уведомления включены!' if new_enabled else '❌ Уведомления выключены.'}")
+                    # Показываем обновлённое меню ребёнка
+                    updated = await get_birthday_settings(
+                        (await get_user(peer_id=message.peer_id)).id, child_id
+                    )
+                    is_e = updated.get("enabled", False)
+                    mode = updated.get("mode", "tomorrow")
+                    h = updated.get("notify_hour", 7)
+                    m = updated.get("notify_minute", 0)
+                    if mode == "weekly":
+                        wd = updated.get("notify_weekday", 1)
+                        wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
+                        mode_desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
+                    else:
+                        mode_desc = f"Ежедневно ({h:02d}:{m:02d})"
+                    lines = [
+                        f"👦 {child_name} ({child_group})" if child_group else f"👦 {child_name}",
+                        f"Статус: {'✅ Включено' if is_e else '❌ Выключено'}",
+                        f"Режим: {mode_desc}",
+                    ]
+                    await message.answer("\n".join(lines), keyboard=get_vk_birthday_child_keyboard(is_e, mode_desc))
+                elif text in ("2", "📅 Режим: завтра"):
+                    await set_birthday_settings(
+                        user_id=(await get_user(peer_id=message.peer_id)).id,
+                        child_id=child_id,
+                        enabled=True,
+                        mode="tomorrow",
+                        notify_weekday=settings.get("notify_weekday", 1),
+                        notify_hour=settings.get("notify_hour", 7),
+                        notify_minute=settings.get("notify_minute", 0),
+                    )
+                    user = await get_user(peer_id=message.peer_id)
+                    if not getattr(user, 'vk_birthday_enabled', False):
+                        await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
+                    await message.answer("✅ Режим установлен: уведомлять за день до ДР")
+                elif text in ("3", "📋 Режим: еженедельно"):
+                    lines = [
+                        "📅 Выберите день недели:\n",
+                        "0 — Понедельник",
+                        "1 — Вторник",
+                        "2 — Среда",
+                        "3 — Четверг",
+                        "4 — Пятница",
+                        "5 — Суббота",
+                        "6 — Воскресенье",
+                    ]
+                    await save_vk_fsm_state(message.peer_id, "bd_set_weekday",
+                        data=f"{child_id}|{child_idx}|{child_name}|{child_group}")
+                    await message.answer("\n".join(lines))
+                elif text in ("4", "⏰ Изменить время"):
+                    lines = [
+                        "⏰ Введите час уведомления (6-21):",
+                        "Пример: 7 для 07:00",
+                    ]
+                    await save_vk_fsm_state(message.peer_id, "bd_set_hour",
+                        data=f"{child_id}|{child_idx}|{child_name}|{child_group}")
+                    await message.answer("\n".join(lines))
+                else:
+                    await message.answer("❌ Неизвестная команда. Введите число 1-4:")
+
+            elif state_name == "bd_set_weekday":
+                parts_data = state.get("data", "").split("|")
+                child_id = int(parts_data[0])
+                child_idx = int(parts_data[1])
+                child_name = parts_data[2]
+                child_group = parts_data[3] if len(parts_data) > 3 else ""
+                try:
+                    weekday = int(text.strip())
+                except ValueError:
+                    await message.answer("❌ Введите число от 0 (Пн) до 6 (Вс):")
+                    return
+                if weekday < 0 or weekday > 6:
+                    await message.answer("❌ Введите число от 0 до 6:")
+                    return
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                settings = await get_birthday_settings(user.id, child_id)
+                await set_birthday_settings(
+                    user_id=user.id,
+                    child_id=child_id,
+                    enabled=True,
+                    mode="weekly",
+                    notify_weekday=weekday,
+                    notify_hour=settings.get("notify_hour", 7),
+                    notify_minute=settings.get("notify_minute", 0),
+                )
+                if not getattr(user, 'vk_birthday_enabled', False):
+                    await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
+                wd_name = VK_BD_WEEKDAY_NAMES[weekday].split(" — ")[1]
+                await message.answer(f"✅ День недели: {wd_name}\n\nТеперь введите час уведомления (6-21):")
+                await save_vk_fsm_state(message.peer_id, "bd_set_hour",
+                    data=f"{child_id}|{child_idx}|{child_name}|{child_group}")
+
+            elif state_name == "bd_set_hour":
+                parts_data = state.get("data", "").split("|")
+                child_id = int(parts_data[0])
+                child_idx = int(parts_data[1])
+                child_name = parts_data[2]
+                child_group = parts_data[3] if len(parts_data) > 3 else ""
+                try:
+                    hour = int(text.strip())
+                except ValueError:
+                    await message.answer("❌ Введите число от 6 до 21:")
+                    return
+                if hour < 6 or hour > 21:
+                    await message.answer("❌ Час должен быть от 6 до 21:")
+                    return
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                settings = await get_birthday_settings(user.id, child_id)
+                await set_birthday_settings(
+                    user_id=user.id,
+                    child_id=child_id,
+                    enabled=True,
+                    mode=settings.get("mode", "tomorrow"),
+                    notify_weekday=settings.get("notify_weekday", 1),
+                    notify_hour=hour,
+                    notify_minute=settings.get("notify_minute", 0),
+                )
+                await message.answer(
+                    f"⏰ Введите минуты:\n\n"
+                    f"0 — :00\n15 — :15\n30 — :30\n45 — :45"
+                )
+                await save_vk_fsm_state(message.peer_id, "bd_set_minute",
+                    data=f"{child_id}|{child_idx}|{child_name}|{child_group}|{hour}")
+
+            elif state_name == "bd_set_minute":
+                parts_data = state.get("data", "").split("|")
+                child_id = int(parts_data[0])
+                child_idx = int(parts_data[1])
+                child_name = parts_data[2]
+                child_group = parts_data[3] if len(parts_data) > 3 else ""
+                hour = int(parts_data[4])
+                try:
+                    minute = int(text.strip())
+                except ValueError:
+                    await message.answer("❌ Введите 0, 15, 30 или 45:")
+                    return
+                if minute not in (0, 15, 30, 45):
+                    await message.answer("❌ Введите 0, 15, 30 или 45:")
+                    return
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                settings = await get_birthday_settings(user.id, child_id)
+                await set_birthday_settings(
+                    user_id=user.id,
+                    child_id=child_id,
+                    enabled=True,
+                    mode=settings.get("mode", "tomorrow"),
+                    notify_weekday=settings.get("notify_weekday", 1),
+                    notify_hour=hour,
+                    notify_minute=minute,
+                )
+                mode = settings.get("mode", "tomorrow")
+                time_str = f"{hour:02d}:{minute:02d}"
+                if mode == "weekly":
+                    wd = settings.get("notify_weekday", 1)
+                    wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
+                    desc = f"Еженедельно ({wd_name}, {time_str})"
+                else:
+                    desc = f"Ежедневно ({time_str})"
+                await clear_vk_fsm_state(message.peer_id)
+                await message.answer(
+                    f"✅ Настройки сохранены!\n\n"
+                    f"👦 {child_name} ({child_group})\n"
+                    f"Режим: {desc}",
                     keyboard=get_vk_settings_keyboard()
                 )
 

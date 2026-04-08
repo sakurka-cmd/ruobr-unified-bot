@@ -178,9 +178,16 @@ async def cb_toggle_global(
     await create_or_update_user(callback.message.chat.id, birthday_enabled=new_status)
     await callback.answer(f"{'Включено' if new_status else 'Выключено'}!")
 
-    # Переоткрываем экран настроек
+    # Переоткрываем экран настроек — pre-fetch детей
     updated = await get_user(callback.message.chat.id)
-    await _show_birthday_menu(callback, updated)
+    _login, _password = safe_decrypt(updated)
+    children = None
+    if _login:
+        try:
+            children = await get_children_async(_login, _password)
+        except Exception:
+            pass
+    await _show_birthday_menu(callback, updated, children=children)
 
 
 @router.callback_query(F.data == "bd_back")
@@ -219,6 +226,8 @@ async def cb_child_settings(callback: CallbackQuery, user_config: Optional[UserC
     child_id = int(parts[2])
     child_index = int(parts[3])
 
+    # Показываем loading, потом грузим детей
+    await callback.message.edit_text("⏳ Загрузка...")
     await _show_child_settings_screen(callback, user_config, child_id, child_index)
 
 
@@ -232,7 +241,15 @@ async def cb_back_to_menu(callback: CallbackQuery, user_config: Optional[UserCon
         return
 
     await callback.answer()
-    await _show_birthday_menu(callback, user_config)
+    # Pre-fetch детей для быстрого отображения
+    _login, _password = safe_decrypt(user_config)
+    children = None
+    if _login:
+        try:
+            children = await get_children_async(_login, _password)
+        except Exception:
+            pass
+    await _show_birthday_menu(callback, user_config, children=children)
 
 
 @router.callback_query(F.data == "bd_noop")
@@ -274,9 +291,20 @@ async def cb_toggle_child_enable(callback: CallbackQuery, user_config: Optional[
 
     await callback.answer(f"{'Включено' if new_enabled else 'Выключено'}!")
 
-    # Обновляем экран настроек ребёнка
+    # Обновляем экран настроек ребёнка — pre-fetch детей, чтобы не дергать API
     updated_user = await get_user(callback.message.chat.id)
-    await _show_child_settings_screen(callback, updated_user, child_id, child_index)
+    _login, _password = safe_decrypt(updated_user)
+    children = None
+    if _login:
+        try:
+            children = await get_children_async(_login, _password)
+        except Exception:
+            pass
+    if children:
+        await _show_child_settings_screen(callback, updated_user, child_id, child_index, children=children)
+    else:
+        # Fallback: без имён детей
+        await _show_child_settings_screen(callback, updated_user, child_id, child_index)
 
 
 @router.callback_query(F.data.startswith("bd_mode_tomorrow_"))
@@ -470,16 +498,20 @@ async def _show_child_settings_screen(
     user_config: UserConfig,
     child_id: int,
     child_index: int,
+    children: list = None,
 ):
-    """Показать экран настроек ДР для конкретного ребёнка (без callback.answer)."""
-    try:
-        _login, _password = safe_decrypt(user_config)
-        if not _login:
+    """Показать экран настроек ДР для конкретного ребёнка (без callback.answer).
+    Если children не передан — загрузит из API (медленно).
+    """
+    if children is None:
+        try:
+            _login, _password = safe_decrypt(user_config)
+            if not _login:
+                return
+            children = await get_children_async(_login, _password)
+        except Exception:
+            await callback.message.edit_text("❌ Ошибка получения списка детей.")
             return
-        children = await get_children_async(_login, _password)
-    except Exception:
-        await callback.message.edit_text("❌ Ошибка получения списка детей.")
-        return
 
     if not children or child_index >= len(children):
         await callback.message.edit_text("❌ Ребёнок не найден.")
@@ -530,20 +562,23 @@ async def _show_child_settings_screen(
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
-async def _show_birthday_menu(callback: CallbackQuery, user_config: UserConfig):
-    """Показать главное меню настроек ДР (для callback)."""
+async def _show_birthday_menu(callback: CallbackQuery, user_config: UserConfig, children: list = None):
+    """Показать главное меню настроек ДР (для callback).
+    Если children не передан — загрузит из API (медленно).
+    """
     if not user_config.login or not user_config.password_encrypted:
         await callback.message.edit_text("❌ Сначала настройте логин/пароль через /set_login")
         return
 
-    try:
-        _login, _password = safe_decrypt(user_config)
-        if not _login:
+    if children is None:
+        try:
+            _login, _password = safe_decrypt(user_config)
+            if not _login:
+                return
+            children = await get_children_async(_login, _password)
+        except Exception:
+            await callback.message.edit_text("❌ Ошибка получения списка детей.")
             return
-        children = await get_children_async(_login, _password)
-    except Exception:
-        await callback.message.edit_text("❌ Ошибка получения списка детей.")
-        return
 
     if not children:
         await callback.message.edit_text("❌ Дети не найдены.")
