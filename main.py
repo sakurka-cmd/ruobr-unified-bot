@@ -86,8 +86,9 @@ async def run_vk_bot(vk_token: str):
             get_user, get_all_thresholds_for_chat, create_or_update_user,
             create_link_code, consume_link_code, link_accounts, unlink_channel
         )
-        from bot.services import get_children_async, get_food_for_children, get_timetable_for_children, AuthenticationError
-        from bot.utils.formatters import format_balance, format_food_visit, format_date, format_lesson, format_mark, format_weekday, truncate_text
+        from bot.services import get_children_async, get_food_for_children, get_timetable_for_children, AuthenticationError, get_classmates_for_child, get_achievements_for_child, get_certificate_for_child, get_guide_for_child
+        from bot.utils.formatters import format_balance, format_food_visit, format_date, format_lesson, format_mark, format_weekday, truncate_text, clean_html_text, has_meaningful_text, extract_homework_files
+        from datetime import date, timedelta, datetime
 
         # ===== VK Keyboards =====
         def get_vk_main_keyboard():
@@ -96,11 +97,14 @@ async def run_vk_bot(vk_token: str):
                 .add(Text("📅 Расписание сегодня"), color=KeyboardButtonColor.PRIMARY)
                 .add(Text("📅 Расписание завтра"), color=KeyboardButtonColor.PRIMARY)
                 .row()
+                .add(Text("📘 ДЗ на завтра"), color=KeyboardButtonColor.PRIMARY)
+                .add(Text("⭐ Оценки сегодня"), color=KeyboardButtonColor.PRIMARY)
+                .row()
                 .add(Text("💰 Баланс питания"), color=KeyboardButtonColor.POSITIVE)
                 .add(Text("🍽 Питание сегодня"), color=KeyboardButtonColor.POSITIVE)
                 .row()
                 .add(Text("⚙️ Настройки"), color=KeyboardButtonColor.NEGATIVE)
-                .add(Text("👤 Мой профиль"), color=KeyboardButtonColor.SECONDARY)
+                .add(Text("ℹ️ Информация"), color=KeyboardButtonColor.SECONDARY)
             ).get_json()
 
         def get_vk_settings_keyboard():
@@ -108,6 +112,19 @@ async def run_vk_bot(vk_token: str):
                 Keyboard(one_time=False, inline=False)
                 .add(Text("🔔 Уведомления"), color=KeyboardButtonColor.PRIMARY)
                 .add(Text("👤 Мой профиль"), color=KeyboardButtonColor.PRIMARY)
+                .row()
+                .add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+            ).get_json()
+
+        def get_vk_info_keyboard():
+            return (
+                Keyboard(one_time=False, inline=False)
+                .add(Text("👥 Одноклассники"), color=KeyboardButtonColor.PRIMARY)
+                .add(Text("👩\u200d🏫 Учителя"), color=KeyboardButtonColor.PRIMARY)
+                .row()
+                .add(Text("🎓 Доп. образование"), color=KeyboardButtonColor.PRIMARY)
+                .row()
+                .add(Text("📋 Справка"), color=KeyboardButtonColor.SECONDARY)
                 .row()
                 .add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
             ).get_json()
@@ -187,6 +204,10 @@ async def run_vk_bot(vk_token: str):
             else:
                 text += "💡 /unlink_tg — отвязать Telegram"
             await message.answer(text)
+
+        @vk_labeler.message(text="ℹ️ Информация")
+        async def vk_info(message: Message):
+            await message.answer("ℹ️ Информация\n\nВыберите что хотите узнать:", keyboard=get_vk_info_keyboard())
 
         @vk_labeler.message(text="⚙️ Настройки")
         async def vk_settings(message: Message):
@@ -313,6 +334,323 @@ async def run_vk_bot(vk_token: str):
                 await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На сегодня питания не найдено.")
             except Exception as e:
                 await message.answer(f"❌ Ошибка: {e}")
+
+        # ===== Оценки сегодня =====
+        @vk_labeler.message(text="⭐ Оценки сегодня")
+        async def vk_marks_today(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            try:
+                today = date.today()
+                today_str = today.strftime("%Y-%m-%d")
+                timetable = await get_timetable_for_children(login, password, children, today, today)
+                lines = [f"⭐ Оценки за сегодня ({format_date(today_str)})"]
+                found = False
+                for child in children:
+                    lessons = timetable.get(child.id, [])
+                    child_header_added = False
+                    for lesson in lessons:
+                        if not lesson.marks:
+                            continue
+                        if not child_header_added:
+                            lines.append(f"\n👦 {child.full_name} ({child.group}):")
+                            child_header_added = True
+                        for mark in lesson.marks:
+                            found = True
+                            question_type = mark.get("question_type", "") or mark.get("question_name", "")
+                            value = mark.get("mark", "")
+                            lines.append(f"  {lesson.subject}: {question_type} → {value}")
+                await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ За сегодня оценок не найдено.")
+            except Exception as e:
+                await message.answer(f"❌ Ошибка: {e}")
+
+        # ===== ДЗ на завтра =====
+        def _vk_normalize_hw_deadline(deadline_str: str) -> str:
+            if not deadline_str:
+                return ""
+            deadline_str = str(deadline_str).strip()
+            if len(deadline_str) == 10 and deadline_str[4] == '-' and deadline_str[7] == '-':
+                return deadline_str
+            for sep in ['T', ' ']:
+                if sep in deadline_str:
+                    deadline_str = deadline_str.split(sep)[0]
+                    break
+            if len(deadline_str) == 10 and deadline_str[4] == '-' and deadline_str[7] == '-':
+                return deadline_str
+            for fmt in ["%d.%m.%Y", "%d/%m.%Y", "%d.%m.%y"]:
+                try:
+                    dt = datetime.strptime(deadline_str, fmt)
+                    return dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    continue
+            return deadline_str
+
+        @vk_labeler.message(text="📘 ДЗ на завтра")
+        async def vk_hw_tomorrow(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            try:
+                today = date.today()
+                tomorrow = today + timedelta(days=1)
+                tomorrow_str = tomorrow.strftime("%Y-%m-%d")
+                end = today + timedelta(days=14)
+                timetable = await get_timetable_for_children(login, password, children, today, end)
+                lines = [f"📘 Домашнее задание на завтра ({format_date(tomorrow_str)})"]
+                found = False
+                for child in children:
+                    lessons = timetable.get(child.id, [])
+                    child_header_added = False
+                    for lesson in lessons:
+                        relevant_hw = []
+                        for hw in lesson.homework:
+                            hw_deadline = _vk_normalize_hw_deadline(hw.get("deadline", ""))
+                            if hw_deadline and hw_deadline == tomorrow_str:
+                                relevant_hw.append(hw)
+                            elif not hw_deadline and lesson.date == tomorrow_str:
+                                relevant_hw.append(hw)
+                        if not relevant_hw:
+                            continue
+                        found = True
+                        if not child_header_added:
+                            lines.append(f"\n👦 {child.full_name} ({child.group}):")
+                            child_header_added = True
+                        for hw in relevant_hw:
+                            title = hw.get("title", "")
+                            lines.append(f"  📖 {lesson.subject}: {title}")
+                            hw_text = hw.get("text", "")
+                            if has_meaningful_text(hw_text):
+                                clean_text = clean_html_text(hw_text)
+                                if len(clean_text) > 500:
+                                    clean_text = clean_text[:497] + "..."
+                                lines.append(f"     📝 {clean_text}")
+                await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На завтра домашнее задание не найдено.")
+            except Exception as e:
+                await message.answer(f"❌ Ошибка: {e}")
+
+        # ===== Информация: Одноклассники =====
+        @vk_labeler.message(text="👥 Одноклассники")
+        async def vk_classmates(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+            try:
+                classmates = await get_classmates_for_child(login, password, 0)
+                if not classmates:
+                    await message.answer("ℹ️ Одноклассники не найдены.")
+                    return
+                current_child = children[0]
+                child_as_classmate = type('Classmate', (), {
+                    'last_name': current_child.last_name,
+                    'first_name': current_child.first_name,
+                    'middle_name': current_child.middle_name,
+                    'birth_date': current_child.birth_date,
+                    'gender': current_child.gender,
+                    'full_name': current_child.full_name,
+                    'gender_icon': current_child.gender_icon
+                })()
+                child_in_list = any(c.last_name == child_as_classmate.last_name and
+                                    c.first_name == child_as_classmate.first_name
+                                    for c in classmates)
+                if not child_in_list:
+                    classmates.append(child_as_classmate)
+                classmates_sorted = sorted(classmates, key=lambda c: c.last_name)
+                lines = [f"👥 Классный список — {current_child.full_name} ({len(classmates_sorted)} чел.):\n"]
+                for i, c in enumerate(classmates_sorted, 1):
+                    if c.birth_date:
+                        try:
+                            bd = datetime.strptime(c.birth_date, "%Y-%m-%d")
+                            bd_str = bd.strftime("%d.%m.%Y")
+                            age = datetime.now().year - bd.year
+                            if (datetime.now().month, datetime.now().day) < (bd.month, bd.day):
+                                age -= 1
+                        except (ValueError, TypeError, KeyError):
+                            bd_str = c.birth_date
+                            age = "?"
+                    else:
+                        bd_str = "—"
+                        age = "—"
+                    icon = c.gender_icon
+                    lines.append(f"{i:2}. {c.full_name} {icon} | {bd_str} | {age} лет")
+                await message.answer(truncate_text("\n".join(lines)))
+            except Exception as e:
+                await message.answer(f"❌ Ошибка: {e}")
+
+        # ===== Информация: Учителя =====
+        @vk_labeler.message(text="👩\u200d🏫 Учителя")
+        async def vk_teachers(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+            try:
+                guide = await get_guide_for_child(login, password, 0)
+                if not guide or not guide.teachers:
+                    await message.answer("ℹ️ Учителя не найдены.")
+                    return
+                subject_teachers = [t for t in guide.teachers if t.subject]
+                lines = [f"👩\u200d🏫 Учителя — {children[0].full_name}\n"]
+                lines.append(f"Школа: {guide.name}")
+                if guide.phone:
+                    lines.append(f"Телефон: {guide.phone}")
+                lines.append("")
+                if subject_teachers:
+                    teacher_subject_pairs = []
+                    for t in subject_teachers:
+                        subjects = [s.strip() for s in t.subject.split(",") if s.strip()]
+                        for subject in subjects:
+                            teacher_subject_pairs.append((subject, t.name))
+                    teacher_subject_pairs.sort(key=lambda x: x[0])
+                    for subject, name in teacher_subject_pairs:
+                        lines.append(f"  {subject} — {name}")
+                else:
+                    lines.append("Предметники не найдены.")
+                await message.answer(truncate_text("\n".join(lines)))
+            except Exception as e:
+                await message.answer(f"❌ Ошибка: {e}")
+
+        # ===== Информация: Доп. образование =====
+        @vk_labeler.message(text="🎓 Доп. образование")
+        async def vk_achievements(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+            try:
+                achievements, certificate = await asyncio.gather(
+                    get_achievements_for_child(login, password, 0),
+                    get_certificate_for_child(login, password, 0),
+                    return_exceptions=True
+                )
+                if isinstance(achievements, Exception):
+                    achievements = None
+                if isinstance(certificate, Exception):
+                    certificate = None
+
+                lines = [f"🎓 Дополнительное образование — {children[0].full_name}"]
+                if not certificate:
+                    lines.append("\nДанных о дополнительном образовании пока нет.")
+                    await message.answer("\n".join(lines))
+                    return
+
+                active = certificate.programs_active
+                completed = certificate.programs_completed
+                if not active and not completed:
+                    lines.append("\nДанных о дополнительном образовании пока нет.")
+                    await message.answer("\n".join(lines))
+                    return
+
+                if active:
+                    for p in active:
+                        parts = [f"  • {p.name}"]
+                        if p.org:
+                            parts.append(f"    🏢 {p.org}")
+                        if p.sum:
+                            parts.append(f"    💵 {p.sum} руб.")
+                        lines.append("\n".join(parts))
+
+                if completed:
+                    lines.append(f"\n📜 Прошлые программы ({len(completed)}):")
+                    for p in completed:
+                        parts = [f"  • {p.name}"]
+                        if p.org:
+                            parts.append(f"    🏢 {p.org}")
+                        lines.append("\n".join(parts))
+
+                if certificate.number:
+                    lines.append(f"\n💳 Сертификат ПФДО")
+                    lines.append(f"  Номер: {certificate.number}")
+                    if certificate.nominal:
+                        lines.append(f"  Номинал: {certificate.nominal} руб.")
+                    if certificate.balance:
+                        lines.append(f"  Остаток: {certificate.balance} руб.")
+
+                await message.answer(truncate_text("\n".join(lines)))
+            except Exception as e:
+                await message.answer(f"❌ Ошибка: {e}")
+
+        # ===== Справка =====
+        @vk_labeler.message(text="📋 Справка")
+        async def vk_help(message: Message):
+            help_text = (
+                "📋 Справка по боту\n\n"
+                "Школьный бот — помогает родителям следить за учёбой детей.\n\n"
+                "📅 Расписание:\n"
+                "• «Расписание сегодня» — уроки на сегодня\n"
+                "• «Расписание завтра» — уроки на завтра\n\n"
+                "📘 Домашние задания:\n"
+                "• «ДЗ на завтра» — задания на завтрашний день\n\n"
+                "⭐ Оценки:\n"
+                "• «Оценки сегодня» — оценки за сегодняшний день\n\n"
+                "🍽 Питание:\n"
+                "• «Баланс питания» — текущий баланс счёта\n"
+                "• «Питание сегодня» — что ребёнок ел сегодня\n\n"
+                "ℹ️ Информация:\n"
+                "• «Одноклассники» — список класса\n"
+                "• «Учителя» — предметники и контакты школы\n"
+                "• «Доп. образование» — программы доп. образования\n\n"
+                "⚙️ Настройки:\n"
+                "• «Уведомления» — включить/выключить оповещения\n"
+                "• «Мой профиль» — информация об аккаунте\n\n"
+                "📝 Команды:\n"
+                "/start — главное меню\n"
+                "/set_login — настроить учётные данные\n"
+                "/balance — баланс питания\n\n"
+                "💡 Подсказка: Бот автоматически уведомляет о:\n"
+                "• Низком балансе питания\n"
+                "• Новых оценках\n\n"
+                "🔗 Полезные ссылки:\n"
+                "• cabinet.ruobr.ru — электронный дневник"
+            )
+            await message.answer(help_text)
 
         @vk_labeler.message(text="🔔 Уведомления")
         async def vk_notifications(message: Message):
