@@ -476,14 +476,22 @@ async def run_vk_bot(vk_token: str):
                 if not classmates:
                     await message.answer("ℹ️ Одноклассники не найдены.")
                     return
+                # child может быть dict (из JSON) или Child объектом — единообразно через атрибуты
+                child_ln = child.last_name if hasattr(child, 'last_name') else child.get('last_name', '')
+                child_fn = child.first_name if hasattr(child, 'first_name') else child.get('first_name', '')
+                child_mn = child.middle_name if hasattr(child, 'middle_name') else child.get('middle_name', '')
+                child_bd = child.birth_date if hasattr(child, 'birth_date') else child.get('birth_date', None)
+                child_gender = child.gender if hasattr(child, 'gender') else child.get('gender', None)
+                child_full = child.full_name if hasattr(child, 'full_name') else child.get('full_name', child_ln + ' ' + child_fn)
+                child_icon = child.gender_icon if hasattr(child, 'gender_icon') else child.get('gender_icon', '♂')
                 child_as_classmate = type('Classmate', (), {
-                    'last_name': child.last_name,
-                    'first_name': child.first_name,
-                    'middle_name': child.middle_name,
-                    'birth_date': child.birth_date,
-                    'gender': child.gender,
-                    'full_name': child.full_name,
-                    'gender_icon': child.gender_icon
+                    'last_name': child_ln,
+                    'first_name': child_fn,
+                    'middle_name': child_mn,
+                    'birth_date': child_bd,
+                    'gender': child_gender,
+                    'full_name': child_full,
+                    'gender_icon': child_icon
                 })()
                 child_in_list = any(c.last_name == child_as_classmate.last_name and
                                     c.first_name == child_as_classmate.first_name
@@ -491,7 +499,7 @@ async def run_vk_bot(vk_token: str):
                 if not child_in_list:
                     classmates.append(child_as_classmate)
                 classmates_sorted = sorted(classmates, key=lambda c: c.last_name)
-                lines = [f"👥 Классный список — {child.full_name} ({len(classmates_sorted)} чел.):\n"]
+                lines = [f"👥 Классный список — {child_full} ({len(classmates_sorted)} чел.):\n"]
                 for i, c in enumerate(classmates_sorted, 1):
                     if c.birth_date:
                         try:
@@ -548,8 +556,9 @@ async def run_vk_bot(vk_token: str):
                 if not guide or not guide.teachers:
                     await message.answer("ℹ️ Учителя не найдены.")
                     return
+                child_full = child.full_name if hasattr(child, 'full_name') else child.get('full_name', '')
                 subject_teachers = [t for t in guide.teachers if t.subject]
-                lines = [f"👩\u200d🏫 Учителя — {child.full_name}\n"]
+                lines = [f"👩\u200d🏫 Учителя — {child_full}\n"]
                 lines.append(f"Школа: {guide.name}")
                 if guide.phone:
                     lines.append(f"Телефон: {guide.phone}")
@@ -611,7 +620,8 @@ async def run_vk_bot(vk_token: str):
                 if isinstance(certificate, Exception):
                     certificate = None
 
-                lines = [f"🎓 Дополнительное образование — {child.full_name}"]
+                child_full = child.full_name if hasattr(child, 'full_name') else child.get('full_name', '')
+                lines = [f"🎓 Дополнительное образование — {child_full}"]
                 if not certificate:
                     lines.append("\nДанных о дополнительном образовании пока нет.")
                     await message.answer("\n".join(lines))
@@ -948,12 +958,17 @@ async def run_vk_bot(vk_token: str):
 
             if state_name == "waiting_threshold_child":
                 children_data = json.loads(state.get("data", "[]"))
-                # Find which child button was pressed
+                # Find which child button was pressed (точное или частичное сопоставление)
                 selected = None
                 for cd in children_data:
                     if text == f"👤 {cd['name']} ({cd['group']})":
                         selected = cd
                         break
+                if not selected:
+                    for cd in children_data:
+                        if cd['name'] in text and cd['group'] in text:
+                            selected = cd
+                            break
                 if not selected:
                     await message.answer("❌ Выберите ребёнка из списка ниже.")
                     return
@@ -994,11 +1009,17 @@ async def run_vk_bot(vk_token: str):
 
             elif state_name == "info_select_classmates":
                 children_data = json.loads(state.get("data", "[]"))
+                # Надёжное сопоставление: точное или частичное (VK обрезает >40 символов)
                 selected = None
                 for cd in children_data:
                     if text == f"👤 {cd['name']} ({cd['group']})":
                         selected = cd
                         break
+                if not selected:
+                    for cd in children_data:
+                        if cd['name'] in text and cd['group'] in text:
+                            selected = cd
+                            break
                 if not selected:
                     await message.answer("❌ Выберите ребёнка из списка ниже.")
                     return
@@ -1009,8 +1030,14 @@ async def run_vk_bot(vk_token: str):
                     return
                 from bot.credentials import safe_decrypt
                 login, password = safe_decrypt(user)
+                # Перезапрашиваем детей для получения реального Child объекта
+                try:
+                    real_children = await get_children_async(login, password)
+                    child_obj = real_children[selected["idx"]] if real_children and selected["idx"] < len(real_children) else selected
+                except Exception:
+                    child_obj = selected
                 await clear_vk_fsm_state(message.peer_id)
-                await _vk_show_classmates(message, login, password, selected["idx"], selected)
+                await _vk_show_classmates(message, login, password, selected["idx"], child_obj)
 
             elif state_name == "info_select_teachers":
                 children_data = json.loads(state.get("data", "[]"))
@@ -1020,25 +1047,10 @@ async def run_vk_bot(vk_token: str):
                         selected = cd
                         break
                 if not selected:
-                    await message.answer("❌ Выберите ребёнка из списка ниже.")
-                    return
-                user = await get_user(peer_id=message.peer_id)
-                if not user or not user.login:
-                    await clear_vk_fsm_state(message.peer_id)
-                    await message.answer("❌ Ошибка авторизации.")
-                    return
-                from bot.credentials import safe_decrypt
-                login, password = safe_decrypt(user)
-                await clear_vk_fsm_state(message.peer_id)
-                await _vk_show_teachers(message, login, password, selected["idx"], selected)
-
-            elif state_name == "info_select_achievements":
-                children_data = json.loads(state.get("data", "[]"))
-                selected = None
-                for cd in children_data:
-                    if text == f"👤 {cd['name']} ({cd['group']})":
-                        selected = cd
-                        break
+                    for cd in children_data:
+                        if cd['name'] in text and cd['group'] in text:
+                            selected = cd
+                            break
                 if not selected:
                     await message.answer("❌ Выберите ребёнка из списка ниже.")
                     return
@@ -1049,17 +1061,57 @@ async def run_vk_bot(vk_token: str):
                     return
                 from bot.credentials import safe_decrypt
                 login, password = safe_decrypt(user)
+                try:
+                    real_children = await get_children_async(login, password)
+                    child_obj = real_children[selected["idx"]] if real_children and selected["idx"] < len(real_children) else selected
+                except Exception:
+                    child_obj = selected
                 await clear_vk_fsm_state(message.peer_id)
-                await _vk_show_achievements(message, login, password, selected["idx"], selected)
+                await _vk_show_teachers(message, login, password, selected["idx"], child_obj)
 
-            elif state_name == "bd_choose_child":
+            elif state_name == "info_select_achievements":
                 children_data = json.loads(state.get("data", "[]"))
-                # Find which child button was pressed
                 selected = None
                 for cd in children_data:
                     if text == f"👤 {cd['name']} ({cd['group']})":
                         selected = cd
                         break
+                if not selected:
+                    for cd in children_data:
+                        if cd['name'] in text and cd['group'] in text:
+                            selected = cd
+                            break
+                if not selected:
+                    await message.answer("❌ Выберите ребёнка из списка ниже.")
+                    return
+                user = await get_user(peer_id=message.peer_id)
+                if not user or not user.login:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка авторизации.")
+                    return
+                from bot.credentials import safe_decrypt
+                login, password = safe_decrypt(user)
+                try:
+                    real_children = await get_children_async(login, password)
+                    child_obj = real_children[selected["idx"]] if real_children and selected["idx"] < len(real_children) else selected
+                except Exception:
+                    child_obj = selected
+                await clear_vk_fsm_state(message.peer_id)
+                await _vk_show_achievements(message, login, password, selected["idx"], child_obj)
+
+            elif state_name == "bd_choose_child":
+                children_data = json.loads(state.get("data", "[]"))
+                # Find which child button was pressed (точное или частичное сопоставление)
+                selected = None
+                for cd in children_data:
+                    if text == f"👤 {cd['name']} ({cd['group']})":
+                        selected = cd
+                        break
+                if not selected:
+                    for cd in children_data:
+                        if cd['name'] in text and cd['group'] in text:
+                            selected = cd
+                            break
                 if not selected:
                     await message.answer("❌ Выберите ребёнка из списка ниже.")
                     return
