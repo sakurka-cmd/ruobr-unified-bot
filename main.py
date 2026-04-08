@@ -110,8 +110,29 @@ async def run_vk_bot(vk_token: str):
         def get_vk_settings_keyboard():
             return (
                 Keyboard(one_time=False, inline=False)
+                .add(Text("🔑 Изменить логин/пароль"), color=KeyboardButtonColor.PRIMARY)
+                .add(Text("💰 Порог баланса"), color=KeyboardButtonColor.PRIMARY)
+                .row()
                 .add(Text("🔔 Уведомления"), color=KeyboardButtonColor.PRIMARY)
-                .add(Text("👤 Мой профиль"), color=KeyboardButtonColor.PRIMARY)
+                .add(Text("🎂 Дни рождения"), color=KeyboardButtonColor.PRIMARY)
+                .row()
+                .add(Text("👤 Мой профиль"), color=KeyboardButtonColor.SECONDARY)
+                .add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+            ).get_json()
+
+        def get_vk_notifications_keyboard(user):
+            """Динамическая клавиатура переключения уведомлений (как TG inline)."""
+            bal = "✅" if user.vk_balance_enabled else "❌"
+            marks = "✅" if user.vk_marks_enabled else "❌"
+            food = "✅" if user.vk_food_enabled else "❌"
+            birthday = "✅" if getattr(user, 'vk_birthday_enabled', False) else "❌"
+            return (
+                Keyboard(one_time=False, inline=False)
+                .add(Text(f"💰 Баланс: {bal}"), color=KeyboardButtonColor.POSITIVE)
+                .add(Text(f"⭐ Оценки: {marks}"), color=KeyboardButtonColor.POSITIVE)
+                .row()
+                .add(Text(f"🍽 Питание: {food}"), color=KeyboardButtonColor.POSITIVE)
+                .add(Text(f"🎂 Дни рождения: {birthday}"), color=KeyboardButtonColor.POSITIVE)
                 .row()
                 .add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
             ).get_json()
@@ -655,40 +676,57 @@ async def run_vk_bot(vk_token: str):
         @vk_labeler.message(text="🔔 Уведомления")
         async def vk_notifications(message: Message):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            bal = "✅" if user.vk_balance_enabled else "❌"
-            marks = "✅" if user.vk_marks_enabled else "❌"
-            food = "✅" if user.vk_food_enabled else "❌"
-            text = (
-                f"🔔 Настройки уведомлений (VK)\n\n"
-                f"💰 Баланс: {bal} — /bal_notify\n"
-                f"⭐ Оценки: {marks} — /marks_notify\n"
-                f"🍽 Питание: {food} — /food_notify"
+            await message.answer(
+                "🔔 Настройки уведомлений\n\nНажмите для переключения:",
+                keyboard=get_vk_notifications_keyboard(user)
             )
-            await message.answer(text)
 
-        @vk_labeler.message(text="/bal_notify")
-        async def vk_toggle_balance(message: Message):
-            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not user.vk_balance_enabled
-            await create_or_update_user(peer_id=message.peer_id, vk_balance_enabled=new_val)
-            status = "включены" if new_val else "выключены"
-            await message.answer(f"💰 Уведомления о балансе (VK): {status}")
+        @vk_labeler.message(text="🔑 Изменить логин/пароль")
+        async def vk_change_login(message: Message):
+            from bot.database import save_vk_fsm_state
+            await save_vk_fsm_state(message.peer_id, "waiting_for_login")
+            await message.answer("🔐 Введите логин от cabinet.ruobr.ru:\n\n❌ Отмена — для выхода")
 
-        @vk_labeler.message(text="/marks_notify")
-        async def vk_toggle_marks(message: Message):
-            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not user.vk_marks_enabled
-            await create_or_update_user(peer_id=message.peer_id, vk_marks_enabled=new_val)
-            status = "включены" if new_val else "выключены"
-            await message.answer(f"⭐ Уведомления об оценках (VK): {status}")
+        @vk_labeler.message(text="💰 Порог баланса")
+        async def vk_threshold(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+            thresholds = await get_all_thresholds_for_chat(peer_id=message.peer_id)
+            lines = ["💰 Настройка порога баланса\n"]
+            for idx, child in enumerate(children, 1):
+                threshold = thresholds.get(child.id, 300)
+                lines.append(f"{idx}. {child.full_name} ({child.group}) — порог {threshold:.0f} ₽")
+            lines.append(f"\nВведите номер ребёнка (1-{len(children)}):\n❌ Отмена — для выхода")
+            from bot.database import save_vk_fsm_state
+            await save_vk_fsm_state(message.peer_id, "waiting_threshold_child", data=str(len(children)))
+            await message.answer("\n".join(lines))
 
-        @vk_labeler.message(text="/food_notify")
-        async def vk_toggle_food(message: Message):
+        @vk_labeler.message(text="🎂 Дни рождения")
+        async def vk_birthday(message: Message):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not user.vk_food_enabled
-            await create_or_update_user(peer_id=message.peer_id, vk_food_enabled=new_val)
-            status = "включены" if new_val else "выключены"
-            await message.answer(f"🍽 Уведомления о питании (VK): {status}")
+            enabled = getattr(user, 'vk_birthday_enabled', False)
+            status = "✅ включены" if enabled else "❌ выключены"
+            text = (
+                f"🎂 Настройки уведомлений о днях рождения\n\n"
+                f"Статус: {status}\n\n"
+                f"Уведомления о днях рождения одноклассников "
+                f"будут приходить в VK.\n\n"
+                f"Для включения/выключения:\n"
+                f"🔔 Уведомления → Дни рождения"
+            )
+            await message.answer(text, keyboard=get_vk_settings_keyboard())
 
         # FSM: ввод кода привязки от TG
         @vk_labeler.message(text="/enter_code")
@@ -731,6 +769,51 @@ async def run_vk_bot(vk_token: str):
                     await message.answer("❌ Не удалось привязать. Попробуйте ещё раз.")
                 # Не 8-значный код — идём дальше в FSM
 
+            # Переключатели уведомлений (кнопки с динамическим текстом)
+            if text.startswith("💰 Баланс:"):
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                new_val = not user.vk_balance_enabled
+                await create_or_update_user(peer_id=message.peer_id, vk_balance_enabled=new_val)
+                user = await get_user(peer_id=message.peer_id)
+                await message.answer(
+                    f"💰 Уведомления о балансе: {'включены ✅' if new_val else 'выключены ❌'}",
+                    keyboard=get_vk_notifications_keyboard(user)
+                )
+                return
+
+            if text.startswith("⭐ Оценки:"):
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                new_val = not user.vk_marks_enabled
+                await create_or_update_user(peer_id=message.peer_id, vk_marks_enabled=new_val)
+                user = await get_user(peer_id=message.peer_id)
+                await message.answer(
+                    f"⭐ Уведомления об оценках: {'включены ✅' if new_val else 'выключены ❌'}",
+                    keyboard=get_vk_notifications_keyboard(user)
+                )
+                return
+
+            if text.startswith("🍽 Питание:"):
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                new_val = not user.vk_food_enabled
+                await create_or_update_user(peer_id=message.peer_id, vk_food_enabled=new_val)
+                user = await get_user(peer_id=message.peer_id)
+                await message.answer(
+                    f"🍽 Уведомления о питании: {'включены ✅' if new_val else 'выключены ❌'}",
+                    keyboard=get_vk_notifications_keyboard(user)
+                )
+                return
+
+            if text.startswith("🎂 Дни рождения:"):
+                user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+                new_val = not getattr(user, 'vk_birthday_enabled', False)
+                await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=new_val)
+                user = await get_user(peer_id=message.peer_id)
+                await message.answer(
+                    f"🎂 Уведомления о днях рождения: {'включены ✅' if new_val else 'выключены ❌'}",
+                    keyboard=get_vk_notifications_keyboard(user)
+                )
+                return
+
             state = await get_vk_fsm_state(message.peer_id)
             if not state:
                 return
@@ -742,7 +825,63 @@ async def run_vk_bot(vk_token: str):
                 await message.answer("❌ Отменено.", keyboard=get_vk_main_keyboard())
                 return
 
-            if state_name == "waiting_for_link_code":
+            if state_name == "waiting_threshold_child":
+                from bot.database import get_child_threshold, set_child_threshold as db_set_threshold
+                max_children = int(state.get("data") or "1")
+                try:
+                    child_num = int(text.strip())
+                except ValueError:
+                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
+                    return
+                if child_num < 1 or child_num > max_children:
+                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
+                    return
+                await save_vk_fsm_state(message.peer_id, "waiting_threshold_value", data=str(child_num))
+                await message.answer("Введите новый порог (число, например: 300):")
+
+            elif state_name == "waiting_threshold_value":
+                from bot.database import set_child_threshold as db_set_threshold
+                try:
+                    value = float(text.strip().replace(",", "."))
+                except ValueError:
+                    await message.answer("❌ Введите число (например: 300).")
+                    return
+                if value < 0:
+                    await message.answer("❌ Порог не может быть отрицательным.")
+                    return
+                if value > 10000:
+                    await message.answer("❌ Порог слишком большой (максимум 10 000 ₽).")
+                    return
+                # Получаем детей для определения child_id
+                user = await get_user(peer_id=message.peer_id)
+                if not user or not user.login:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка. Попробуйте заново.", keyboard=get_vk_main_keyboard())
+                    return
+                from bot.credentials import safe_decrypt
+                login, password = safe_decrypt(user)
+                try:
+                    children = await get_children_async(login, password)
+                except Exception:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка авторизации.", keyboard=get_vk_main_keyboard())
+                    return
+                child_idx = int(state.get("data") or "1") - 1
+                if not children or child_idx >= len(children):
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ребёнок не найден.", keyboard=get_vk_main_keyboard())
+                    return
+                child = children[child_idx]
+                await db_set_threshold(message.peer_id, child.id, value)
+                await clear_vk_fsm_state(message.peer_id)
+                await message.answer(
+                    f"✅ Порог установлен!\n\n"
+                    f"{child.full_name} ({child.group}): {value:.0f} ₽\n\n"
+                    f"Вы будете получать уведомления, когда баланс упадёт ниже этого значения.",
+                    keyboard=get_vk_settings_keyboard()
+                )
+
+            elif state_name == "waiting_for_link_code":
                 code = text.upper().strip()
                 if len(code) != 8:
                     await message.answer("❌ Код должен содержать 8 символов. Попробуйте ещё раз:")
