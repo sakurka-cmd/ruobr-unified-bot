@@ -657,19 +657,19 @@ async def create_or_update_user(
 
         # Обновляем TG notification_settings
         tg_updates = []
-        tg_params: List[Any] = [existing_id]
+        tg_set_params: List[Any] = []  # параметры для SET (перед WHERE)
         if enabled is not None:
             tg_updates.append("balance_enabled = ?")
-            tg_params.append(1 if enabled else 0)
+            tg_set_params.append(1 if enabled else 0)
         if marks_enabled is not None:
             tg_updates.append("marks_enabled = ?")
-            tg_params.append(1 if marks_enabled else 0)
+            tg_set_params.append(1 if marks_enabled else 0)
         if food_enabled is not None:
             tg_updates.append("food_enabled = ?")
-            tg_params.append(1 if food_enabled else 0)
+            tg_set_params.append(1 if food_enabled else 0)
         if birthday_enabled is not None:
             tg_updates.append("birthday_enabled = ?")
-            tg_params.append(1 if birthday_enabled else 0)
+            tg_set_params.append(1 if birthday_enabled else 0)
 
         if tg_updates:
             await conn.execute(
@@ -680,25 +680,25 @@ async def create_or_update_user(
             await conn.execute(
                 f"UPDATE notification_settings SET {', '.join(tg_updates)} "
                 f"WHERE user_id = ? AND channel = 'tg'",
-                tg_params
+                tg_set_params + [existing_id]
             )
             await conn.commit()
 
         # Обновляем VK notification_settings
         vk_updates = []
-        vk_params: List[Any] = [existing_id]
+        vk_set_params: List[Any] = []  # параметры для SET (перед WHERE)
         if vk_balance_enabled is not None:
             vk_updates.append("balance_enabled = ?")
-            vk_params.append(1 if vk_balance_enabled else 0)
+            vk_set_params.append(1 if vk_balance_enabled else 0)
         if vk_marks_enabled is not None:
             vk_updates.append("marks_enabled = ?")
-            vk_params.append(1 if vk_marks_enabled else 0)
+            vk_set_params.append(1 if vk_marks_enabled else 0)
         if vk_food_enabled is not None:
             vk_updates.append("food_enabled = ?")
-            vk_params.append(1 if vk_food_enabled else 0)
+            vk_set_params.append(1 if vk_food_enabled else 0)
         if vk_birthday_enabled is not None:
             vk_updates.append("birthday_enabled = ?")
-            vk_params.append(1 if vk_birthday_enabled else 0)
+            vk_set_params.append(1 if vk_birthday_enabled else 0)
 
         if vk_updates:
             await conn.execute(
@@ -709,7 +709,7 @@ async def create_or_update_user(
             await conn.execute(
                 f"UPDATE notification_settings SET {', '.join(vk_updates)} "
                 f"WHERE user_id = ? AND channel = 'vk'",
-                vk_params
+                vk_set_params + [existing_id]
             )
             await conn.commit()
         elif peer_id is not None:
