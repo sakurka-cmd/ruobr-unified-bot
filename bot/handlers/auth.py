@@ -997,13 +997,23 @@ async def cb_profile_link_vk(callback: CallbackQuery, user_config: Optional[User
     
     code = await create_link_code(user_config.id, source="tg")
     
-    text = (
-        "🔗 <b>Привязка VK аккаунта</b>\n\n"
-        "1. Откройте VK бот\n"
-        "2. Отправьте команду:\n"
-        f"   <code>/link_tg {code}</code>\n\n"
-        "⏰ Код действителен 10 минут."
-    )
+    if config.vk_group_id:
+        vk_link = f"https://vk.com/im?sel=-{config.vk_group_id}"
+        text = (
+            "🔗 <b>Привязка VK аккаунта</b>\n\n"
+            f"1. Откройте [VK бот]({vk_link})\n"
+            f"2. Отправьте команду:\n"
+            f"   <code>/link_tg {code}</code>\n\n"
+            "⏰ Код действителен 10 минут."
+        )
+    else:
+        text = (
+            "🔗 <b>Привязка VK аккаунта</b>\n\n"
+            f"1. Откройте VK бот\n"
+            f"2. Отправьте команду:\n"
+            f"   <code>/link_tg {code}</code>\n\n"
+            "⏰ Код действителен 10 минут."
+        )
     
     await callback.message.edit_text(text)
     await callback.answer()

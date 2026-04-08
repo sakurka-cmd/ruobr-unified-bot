@@ -359,7 +359,7 @@ async def run_vk_bot(vk_token: str):
                 "❌ Отмена — для выхода"
             )
 
-        # FSM: ввод логина/пароля
+        # FSM: ввод логина/пароля / авто-приём кода привязки
         @vk_labeler.message()
         async def vk_handle_all(message: Message):
             text = (message.text or "").strip()
@@ -367,6 +367,28 @@ async def run_vk_bot(vk_token: str):
                 return
 
             from bot.database import get_vk_fsm_state, save_vk_fsm_state, clear_vk_fsm_state
+
+            # Авто-приём кода привязки (8 символов, без FSM)
+            if len(text) == 8 and text.isalnum():
+                result = await consume_link_code(text.upper())
+                if result is not None:
+                    tg_user_id, source = result
+                    if source == "tg":
+                        from bot.database import get_user_by_id
+                        tg_user = await get_user_by_id(tg_user_id)
+                        if tg_user and tg_user.chat_id:
+                            current = await get_user(peer_id=message.peer_id)
+                            if current and current.id:
+                                await link_accounts(current.id, chat_id=tg_user.chat_id)
+                                await message.answer(
+                                    f"✅ Telegram аккаунт привязан! (id: {tg_user.chat_id})\n\n"
+                                    "Теперь уведомления будут приходить и в Telegram.",
+                                    keyboard=get_vk_main_keyboard()
+                                )
+                                return
+                    await message.answer("❌ Этот код предназначен для другого мессенджера или уже использован.")
+                # Не 8-значный код — идём дальше в FSM
+
             state = await get_vk_fsm_state(message.peer_id)
             if not state:
                 return

@@ -21,6 +21,7 @@ class Config:
 
     # VK
     vk_token: str = field(default_factory=lambda: os.getenv("VK_TOKEN", ""))
+    vk_group_id: str = field(default_factory=lambda: os.getenv("VK_GROUP_ID", ""))
 
     # Encryption
     encryption_key: str = field(default_factory=lambda: os.getenv("ENCRYPTION_KEY", ""))
