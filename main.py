@@ -91,6 +91,7 @@ async def run_vk_bot(vk_token: str):
         from bot.services import get_children_async, get_food_for_children, get_timetable_for_children, AuthenticationError, get_classmates_for_child, get_achievements_for_child, get_certificate_for_child, get_guide_for_child
         from bot.utils.formatters import format_balance, format_food_visit, format_date, format_lesson, format_mark, format_weekday, truncate_text, clean_html_text, has_meaningful_text, extract_homework_files
         from datetime import date, timedelta, datetime
+        import json
 
         # ===== VK Keyboards =====
         def get_vk_main_keyboard():
@@ -469,36 +470,20 @@ async def run_vk_bot(vk_token: str):
                 await message.answer(f"❌ Ошибка: {e}")
 
         # ===== Информация: Одноклассники =====
-        @vk_labeler.message(text="👥 Одноклассники")
-        async def vk_classmates(message: Message):
-            user = await get_user(peer_id=message.peer_id)
-            if not user or not user.login:
-                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
-                return
-            from bot.credentials import safe_decrypt
-            login, password = safe_decrypt(user)
+        async def _vk_show_classmates(message, login, password, child_idx, child):
             try:
-                children = await get_children_async(login, password)
-            except Exception:
-                await message.answer("❌ Ошибка авторизации.")
-                return
-            if not children:
-                await message.answer("❌ Дети не найдены.")
-                return
-            try:
-                classmates = await get_classmates_for_child(login, password, 0)
+                classmates = await get_classmates_for_child(login, password, child_idx)
                 if not classmates:
                     await message.answer("ℹ️ Одноклассники не найдены.")
                     return
-                current_child = children[0]
                 child_as_classmate = type('Classmate', (), {
-                    'last_name': current_child.last_name,
-                    'first_name': current_child.first_name,
-                    'middle_name': current_child.middle_name,
-                    'birth_date': current_child.birth_date,
-                    'gender': current_child.gender,
-                    'full_name': current_child.full_name,
-                    'gender_icon': current_child.gender_icon
+                    'last_name': child.last_name,
+                    'first_name': child.first_name,
+                    'middle_name': child.middle_name,
+                    'birth_date': child.birth_date,
+                    'gender': child.gender,
+                    'full_name': child.full_name,
+                    'gender_icon': child.gender_icon
                 })()
                 child_in_list = any(c.last_name == child_as_classmate.last_name and
                                     c.first_name == child_as_classmate.first_name
@@ -506,7 +491,7 @@ async def run_vk_bot(vk_token: str):
                 if not child_in_list:
                     classmates.append(child_as_classmate)
                 classmates_sorted = sorted(classmates, key=lambda c: c.last_name)
-                lines = [f"👥 Классный список — {current_child.full_name} ({len(classmates_sorted)} чел.):\n"]
+                lines = [f"👥 Классный список — {child.full_name} ({len(classmates_sorted)} чел.):\n"]
                 for i, c in enumerate(classmates_sorted, 1):
                     if c.birth_date:
                         try:
@@ -527,9 +512,8 @@ async def run_vk_bot(vk_token: str):
             except Exception as e:
                 await message.answer(f"❌ Ошибка: {e}")
 
-        # ===== Информация: Учителя =====
-        @vk_labeler.message(text="👩\u200d🏫 Учителя")
-        async def vk_teachers(message: Message):
+        @vk_labeler.message(text="👥 Одноклассники")
+        async def vk_classmates(message: Message):
             user = await get_user(peer_id=message.peer_id)
             if not user or not user.login:
                 await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -544,13 +528,28 @@ async def run_vk_bot(vk_token: str):
             if not children:
                 await message.answer("❌ Дети не найдены.")
                 return
+            if len(children) == 1:
+                await _vk_show_classmates(message, login, password, 0, children[0])
+                return
+            # Multiple children — show selection
+            children_data = [{"id": c.id, "idx": i, "name": c.full_name, "group": c.group} for i, c in enumerate(children)]
+            k = Keyboard(one_time=False, inline=False)
+            for cd in children_data:
+                k.add(Text(f"👤 {cd['name']} ({cd['group']})"), color=KeyboardButtonColor.PRIMARY)
+                k.row()
+            k.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+            await save_vk_fsm_state(message.peer_id, "info_select_classmates", data=json.dumps(children_data))
+            await message.answer("👦👧 Выберите ребёнка:", keyboard=k.get_json())
+
+        # ===== Информация: Учителя =====
+        async def _vk_show_teachers(message, login, password, child_idx, child):
             try:
-                guide = await get_guide_for_child(login, password, 0)
+                guide = await get_guide_for_child(login, password, child_idx)
                 if not guide or not guide.teachers:
                     await message.answer("ℹ️ Учителя не найдены.")
                     return
                 subject_teachers = [t for t in guide.teachers if t.subject]
-                lines = [f"👩\u200d🏫 Учителя — {children[0].full_name}\n"]
+                lines = [f"👩\u200d🏫 Учителя — {child.full_name}\n"]
                 lines.append(f"Школа: {guide.name}")
                 if guide.phone:
                     lines.append(f"Телефон: {guide.phone}")
@@ -570,9 +569,8 @@ async def run_vk_bot(vk_token: str):
             except Exception as e:
                 await message.answer(f"❌ Ошибка: {e}")
 
-        # ===== Информация: Доп. образование =====
-        @vk_labeler.message(text="🎓 Доп. образование")
-        async def vk_achievements(message: Message):
+        @vk_labeler.message(text="👩\u200d🏫 Учителя")
+        async def vk_teachers(message: Message):
             user = await get_user(peer_id=message.peer_id)
             if not user or not user.login:
                 await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -587,10 +585,25 @@ async def run_vk_bot(vk_token: str):
             if not children:
                 await message.answer("❌ Дети не найдены.")
                 return
+            if len(children) == 1:
+                await _vk_show_teachers(message, login, password, 0, children[0])
+                return
+            # Multiple children — show selection
+            children_data = [{"id": c.id, "idx": i, "name": c.full_name, "group": c.group} for i, c in enumerate(children)]
+            k = Keyboard(one_time=False, inline=False)
+            for cd in children_data:
+                k.add(Text(f"👤 {cd['name']} ({cd['group']})"), color=KeyboardButtonColor.PRIMARY)
+                k.row()
+            k.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+            await save_vk_fsm_state(message.peer_id, "info_select_teachers", data=json.dumps(children_data))
+            await message.answer("👦👧 Выберите ребёнка:", keyboard=k.get_json())
+
+        # ===== Информация: Доп. образование =====
+        async def _vk_show_achievements(message, login, password, child_idx, child):
             try:
                 achievements, certificate = await asyncio.gather(
-                    get_achievements_for_child(login, password, 0),
-                    get_certificate_for_child(login, password, 0),
+                    get_achievements_for_child(login, password, child_idx),
+                    get_certificate_for_child(login, password, child_idx),
                     return_exceptions=True
                 )
                 if isinstance(achievements, Exception):
@@ -598,7 +611,7 @@ async def run_vk_bot(vk_token: str):
                 if isinstance(certificate, Exception):
                     certificate = None
 
-                lines = [f"🎓 Дополнительное образование — {children[0].full_name}"]
+                lines = [f"🎓 Дополнительное образование — {child.full_name}"]
                 if not certificate:
                     lines.append("\nДанных о дополнительном образовании пока нет.")
                     await message.answer("\n".join(lines))
@@ -639,6 +652,35 @@ async def run_vk_bot(vk_token: str):
                 await message.answer(truncate_text("\n".join(lines)))
             except Exception as e:
                 await message.answer(f"❌ Ошибка: {e}")
+
+        @vk_labeler.message(text="🎓 Доп. образование")
+        async def vk_achievements(message: Message):
+            user = await get_user(peer_id=message.peer_id)
+            if not user or not user.login:
+                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
+                return
+            from bot.credentials import safe_decrypt
+            login, password = safe_decrypt(user)
+            try:
+                children = await get_children_async(login, password)
+            except Exception:
+                await message.answer("❌ Ошибка авторизации.")
+                return
+            if not children:
+                await message.answer("❌ Дети не найдены.")
+                return
+            if len(children) == 1:
+                await _vk_show_achievements(message, login, password, 0, children[0])
+                return
+            # Multiple children — show selection
+            children_data = [{"id": c.id, "idx": i, "name": c.full_name, "group": c.group} for i, c in enumerate(children)]
+            k = Keyboard(one_time=False, inline=False)
+            for cd in children_data:
+                k.add(Text(f"👤 {cd['name']} ({cd['group']})"), color=KeyboardButtonColor.PRIMARY)
+                k.row()
+            k.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+            await save_vk_fsm_state(message.peer_id, "info_select_achievements", data=json.dumps(children_data))
+            await message.answer("👦👧 Выберите ребёнка:", keyboard=k.get_json())
 
         # ===== Справка =====
         @vk_labeler.message(text="📋 Справка")
@@ -710,23 +752,30 @@ async def run_vk_bot(vk_token: str):
             for idx, child in enumerate(children, 1):
                 threshold = thresholds.get(child.id, 300)
                 lines.append(f"{idx}. {child.full_name} ({child.group}) — порог {threshold:.0f} ₽")
-            lines.append(f"\nВведите номер ребёнка (1-{len(children)}):\n❌ Отмена — для выхода")
-            from bot.database import save_vk_fsm_state
-            await save_vk_fsm_state(message.peer_id, "waiting_threshold_child", data=str(len(children)))
-            await message.answer("\n".join(lines))
+            lines.append(f"\nВыберите ребёнка:")
+
+            children_data = []
+            k = Keyboard(one_time=False, inline=False)
+            for i, child in enumerate(children):
+                btn_text = f"👤 {child.full_name} ({child.group})"
+                k.add(Text(btn_text), color=KeyboardButtonColor.PRIMARY)
+                k.row()
+                children_data.append({
+                    "id": child.id,
+                    "idx": i,
+                    "name": child.full_name,
+                    "group": child.group,
+                })
+            k.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+
+            await save_vk_fsm_state(message.peer_id, "waiting_threshold_child", data=json.dumps(children_data))
+            await message.answer("\n".join(lines), keyboard=k.get_json())
 
         # ===== Дни рождения (FSM) =====
         VK_BD_WEEKDAY_NAMES = [
             "0 — Понедельник", "1 — Вторник", "2 — Среда",
             "3 — Четверг", "4 — Пятница", "5 — Суббота", "6 — Воскресенье",
         ]
-
-        def get_vk_birthday_menu_keyboard():
-            return (
-                Keyboard(one_time=False, inline=False)
-                .add(Text("📋 Настроить ребёнка"), color=KeyboardButtonColor.PRIMARY)
-                .add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
-            ).get_json()
 
         def get_vk_birthday_child_keyboard(is_enabled, mode_desc):
             k = (
@@ -780,50 +829,25 @@ async def run_vk_bot(vk_token: str):
                 else:
                     lines.append(f"{i}. {child.full_name}: ❌ выкл")
 
-            lines.append(f"\nВведите номер ребёнка (1-{len(children)}) для настройки:")
-            lines.append("❌ Отмена — для выхода")
-            await save_vk_fsm_state(message.peer_id, "bd_choose_child", data=str(len(children)))
-            await message.answer("\n".join(lines), keyboard=get_vk_birthday_menu_keyboard())
+            lines.append(f"\nВыберите ребёнка для настройки:")
 
-        @vk_labeler.message(text="📋 Настроить ребёнка")
-        async def vk_bd_reshow(message: Message):
-            user = await get_user(peer_id=message.peer_id)
-            if not user or not user.login:
-                await message.answer("❌ Сначала настройте логин/пароль: /set_login")
-                return
-            from bot.credentials import safe_decrypt
-            login, password = safe_decrypt(user)
-            try:
-                children = await get_children_async(login, password)
-            except Exception:
-                await message.answer("❌ Ошибка авторизации.")
-                return
-            if not children:
-                await message.answer("❌ Дети не найдены.")
-                return
-            global_status = "✅ ВКЛ" if getattr(user, 'vk_birthday_enabled', False) else "❌ ВЫКЛ"
-            all_settings = await get_all_birthday_settings(user.id)
-            settings_map = {s["child_id"]: s for s in all_settings}
-            lines = [f"🎂 Уведомления о днях рождения\n\nГлобальное: {global_status}\n"]
-            for i, child in enumerate(children, 1):
-                cs = settings_map.get(child.id)
-                if cs and cs.get("enabled"):
-                    mode = cs.get("mode", "tomorrow")
-                    h = cs.get("notify_hour", 7)
-                    m = cs.get("notify_minute", 0)
-                    if mode == "weekly":
-                        wd = cs.get("notify_weekday", 1)
-                        wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
-                        desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
-                    else:
-                        desc = f"Ежедневно ({h:02d}:{m:02d})"
-                    lines.append(f"{i}. {child.full_name}: ✅ {desc}")
-                else:
-                    lines.append(f"{i}. {child.full_name}: ❌ выкл")
-            lines.append(f"\nВведите номер ребёнка (1-{len(children)}):")
-            lines.append("❌ Отмена — для выхода")
-            await save_vk_fsm_state(message.peer_id, "bd_choose_child", data=str(len(children)))
-            await message.answer("\n".join(lines), keyboard=get_vk_birthday_menu_keyboard())
+            # Build keyboard with child buttons
+            children_data = []
+            k = Keyboard(one_time=False, inline=False)
+            for i, child in enumerate(children):
+                btn_text = f"👤 {child.full_name} ({child.group})"
+                k.add(Text(btn_text), color=KeyboardButtonColor.PRIMARY)
+                k.row()
+                children_data.append({
+                    "id": child.id,
+                    "idx": i,
+                    "name": child.full_name,
+                    "group": child.group,
+                })
+            k.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+
+            await save_vk_fsm_state(message.peer_id, "bd_choose_child", data=json.dumps(children_data))
+            await message.answer("\n".join(lines), keyboard=k.get_json())
 
         # FSM: ввод кода привязки от TG
         @vk_labeler.message(text="/enter_code")
@@ -923,17 +947,19 @@ async def run_vk_bot(vk_token: str):
                 return
 
             if state_name == "waiting_threshold_child":
-                from bot.database import get_child_threshold, set_child_threshold as db_set_threshold
-                max_children = int(state.get("data") or "1")
-                try:
-                    child_num = int(text.strip())
-                except ValueError:
-                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
+                children_data = json.loads(state.get("data", "[]"))
+                # Find which child button was pressed
+                selected = None
+                for cd in children_data:
+                    if text == f"👤 {cd['name']} ({cd['group']})":
+                        selected = cd
+                        break
+                if not selected:
+                    await message.answer("❌ Выберите ребёнка из списка ниже.")
                     return
-                if child_num < 1 or child_num > max_children:
-                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
-                    return
-                await save_vk_fsm_state(message.peer_id, "waiting_threshold_value", data=str(child_num))
+                child_id = selected["id"]
+                child_idx = selected["idx"]
+                await save_vk_fsm_state(message.peer_id, "waiting_threshold_value", data=json.dumps(selected))
                 await message.answer("Введите новый порог (число, например: 300):")
 
             elif state_name == "waiting_threshold_value":
@@ -949,65 +975,104 @@ async def run_vk_bot(vk_token: str):
                 if value > 10000:
                     await message.answer("❌ Порог слишком большой (максимум 10 000 ₽).")
                     return
-                # Получаем детей для определения child_id
-                user = await get_user(peer_id=message.peer_id)
-                if not user or not user.login:
+                selected = json.loads(state.get("data", "{}"))
+                child_id = selected.get("id")
+                child_name = selected.get("name", "Ребёнок")
+                child_group = selected.get("group", "")
+                if not child_id:
                     await clear_vk_fsm_state(message.peer_id)
                     await message.answer("❌ Ошибка. Попробуйте заново.", keyboard=get_vk_main_keyboard())
                     return
-                from bot.credentials import safe_decrypt
-                login, password = safe_decrypt(user)
-                try:
-                    children = await get_children_async(login, password)
-                except Exception:
-                    await clear_vk_fsm_state(message.peer_id)
-                    await message.answer("❌ Ошибка авторизации.", keyboard=get_vk_main_keyboard())
-                    return
-                child_idx = int(state.get("data") or "1") - 1
-                if not children or child_idx >= len(children):
-                    await clear_vk_fsm_state(message.peer_id)
-                    await message.answer("❌ Ребёнок не найден.", keyboard=get_vk_main_keyboard())
-                    return
-                child = children[child_idx]
-                await db_set_threshold(message.peer_id, child.id, value)
+                await db_set_threshold(message.peer_id, child_id, value)
                 await clear_vk_fsm_state(message.peer_id)
                 await message.answer(
                     f"✅ Порог установлен!\n\n"
-                    f"{child.full_name} ({child.group}): {value:.0f} ₽\n\n"
+                    f"{child_name} ({child_group}): {value:.0f} ₽\n\n"
                     f"Вы будете получать уведомления, когда баланс упадёт ниже этого значения.",
                     keyboard=get_vk_settings_keyboard()
                 )
 
+            elif state_name == "info_select_classmates":
+                children_data = json.loads(state.get("data", "[]"))
+                selected = None
+                for cd in children_data:
+                    if text == f"👤 {cd['name']} ({cd['group']})":
+                        selected = cd
+                        break
+                if not selected:
+                    await message.answer("❌ Выберите ребёнка из списка ниже.")
+                    return
+                user = await get_user(peer_id=message.peer_id)
+                if not user or not user.login:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка авторизации.")
+                    return
+                from bot.credentials import safe_decrypt
+                login, password = safe_decrypt(user)
+                await clear_vk_fsm_state(message.peer_id)
+                await _vk_show_classmates(message, login, password, selected["idx"], selected)
+
+            elif state_name == "info_select_teachers":
+                children_data = json.loads(state.get("data", "[]"))
+                selected = None
+                for cd in children_data:
+                    if text == f"👤 {cd['name']} ({cd['group']})":
+                        selected = cd
+                        break
+                if not selected:
+                    await message.answer("❌ Выберите ребёнка из списка ниже.")
+                    return
+                user = await get_user(peer_id=message.peer_id)
+                if not user or not user.login:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка авторизации.")
+                    return
+                from bot.credentials import safe_decrypt
+                login, password = safe_decrypt(user)
+                await clear_vk_fsm_state(message.peer_id)
+                await _vk_show_teachers(message, login, password, selected["idx"], selected)
+
+            elif state_name == "info_select_achievements":
+                children_data = json.loads(state.get("data", "[]"))
+                selected = None
+                for cd in children_data:
+                    if text == f"👤 {cd['name']} ({cd['group']})":
+                        selected = cd
+                        break
+                if not selected:
+                    await message.answer("❌ Выберите ребёнка из списка ниже.")
+                    return
+                user = await get_user(peer_id=message.peer_id)
+                if not user or not user.login:
+                    await clear_vk_fsm_state(message.peer_id)
+                    await message.answer("❌ Ошибка авторизации.")
+                    return
+                from bot.credentials import safe_decrypt
+                login, password = safe_decrypt(user)
+                await clear_vk_fsm_state(message.peer_id)
+                await _vk_show_achievements(message, login, password, selected["idx"], selected)
+
             elif state_name == "bd_choose_child":
-                max_children = int(state.get("data") or "1")
-                try:
-                    child_num = int(text.strip())
-                except ValueError:
-                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
+                children_data = json.loads(state.get("data", "[]"))
+                # Find which child button was pressed
+                selected = None
+                for cd in children_data:
+                    if text == f"👤 {cd['name']} ({cd['group']})":
+                        selected = cd
+                        break
+                if not selected:
+                    await message.answer("❌ Выберите ребёнка из списка ниже.")
                     return
-                if child_num < 1 or child_num > max_children:
-                    await message.answer(f"❌ Введите число от 1 до {max_children}:")
-                    return
-                # Загружаем данные ребёнка
+                child_id = selected["id"]
+                child_idx = selected["idx"]
+                child_name = selected["name"]
+                child_group = selected["group"]
                 user = await get_user(peer_id=message.peer_id)
                 if not user or not user.login:
                     await clear_vk_fsm_state(message.peer_id)
                     await message.answer("❌ Ошибка. Попробуйте /set_login", keyboard=get_vk_settings_keyboard())
                     return
-                from bot.credentials import safe_decrypt
-                login, password = safe_decrypt(user)
-                try:
-                    children = await get_children_async(login, password)
-                except Exception:
-                    await clear_vk_fsm_state(message.peer_id)
-                    await message.answer("❌ Ошибка авторизации.", keyboard=get_vk_settings_keyboard())
-                    return
-                if not children or child_num > len(children):
-                    await clear_vk_fsm_state(message.peer_id)
-                    await message.answer("❌ Ребёнок не найден.", keyboard=get_vk_settings_keyboard())
-                    return
-                child = children[child_num - 1]
-                settings = await get_birthday_settings(user.id, child.id)
+                settings = await get_birthday_settings(user.id, child_id)
                 is_enabled = settings.get("enabled", False)
                 mode = settings.get("mode", "tomorrow")
                 h = settings.get("notify_hour", 7)
@@ -1020,7 +1085,7 @@ async def run_vk_bot(vk_token: str):
                     mode_desc = f"Ежедневно ({h:02d}:{m:02d})"
                 status = "✅ Включено" if is_enabled else "❌ Выключено"
                 lines = [
-                    f"👦 {child.full_name} ({child.group})",
+                    f"👦 {child_name} ({child_group})",
                     f"Статус: {status}",
                     f"Режим: {mode_desc}",
                     "",
@@ -1031,7 +1096,7 @@ async def run_vk_bot(vk_token: str):
                     "4 — Изменить время",
                 ]
                 await save_vk_fsm_state(message.peer_id, "bd_child_menu",
-                    data=f"{child.id}|{child_num - 1}|{child.full_name}|{child.group}")
+                    data=f"{child_id}|{child_idx}|{child_name}|{child_group}")
                 await message.answer("\n".join(lines), keyboard=get_vk_birthday_child_keyboard(is_enabled, mode_desc))
 
             elif state_name == "bd_child_menu":
@@ -1119,6 +1184,60 @@ async def run_vk_bot(vk_token: str):
                     await save_vk_fsm_state(message.peer_id, "bd_set_hour",
                         data=f"{child_id}|{child_idx}|{child_name}|{child_group}")
                     await message.answer("\n".join(lines))
+                elif text == "◀️ Назад к списку":
+                    # Go back to birthday menu with child buttons
+                    user = await get_user(peer_id=message.peer_id)
+                    if not user or not user.login:
+                        await clear_vk_fsm_state(message.peer_id)
+                        await message.answer("❌ Ошибка. Попробуйте /set_login", keyboard=get_vk_settings_keyboard())
+                        return
+                    from bot.credentials import safe_decrypt
+                    login, password = safe_decrypt(user)
+                    try:
+                        children = await get_children_async(login, password)
+                    except Exception:
+                        await clear_vk_fsm_state(message.peer_id)
+                        await message.answer("❌ Ошибка авторизации.", keyboard=get_vk_settings_keyboard())
+                        return
+                    if not children:
+                        await clear_vk_fsm_state(message.peer_id)
+                        await message.answer("❌ Дети не найдены.", keyboard=get_vk_settings_keyboard())
+                        return
+                    global_status = "✅ ВКЛ" if getattr(user, 'vk_birthday_enabled', False) else "❌ ВЫКЛ"
+                    all_settings = await get_all_birthday_settings(user.id)
+                    settings_map = {s["child_id"]: s for s in all_settings}
+                    lines = [f"🎂 Уведомления о днях рождения\n\nГлобальное: {global_status}\n"]
+                    for i, child in enumerate(children, 1):
+                        cs = settings_map.get(child.id)
+                        if cs and cs.get("enabled"):
+                            mode = cs.get("mode", "tomorrow")
+                            h = cs.get("notify_hour", 7)
+                            m = cs.get("notify_minute", 0)
+                            if mode == "weekly":
+                                wd = cs.get("notify_weekday", 1)
+                                wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
+                                desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
+                            else:
+                                desc = f"Ежедневно ({h:02d}:{m:02d})"
+                            lines.append(f"{i}. {child.full_name}: ✅ {desc}")
+                        else:
+                            lines.append(f"{i}. {child.full_name}: ❌ выкл")
+                    lines.append(f"\nВыберите ребёнка для настройки:")
+                    bd_children_data = []
+                    k = Keyboard(one_time=False, inline=False)
+                    for i, child in enumerate(children):
+                        btn_text = f"👤 {child.full_name} ({child.group})"
+                        k.add(Text(btn_text), color=KeyboardButtonColor.PRIMARY)
+                        k.row()
+                        bd_children_data.append({
+                            "id": child.id,
+                            "idx": i,
+                            "name": child.full_name,
+                            "group": child.group,
+                        })
+                    k.add(Text("◀️ Назад"), color=KeyboardButtonColor.NEGATIVE)
+                    await save_vk_fsm_state(message.peer_id, "bd_choose_child", data=json.dumps(bd_children_data))
+                    await message.answer("\n".join(lines), keyboard=k.get_json())
                 else:
                     await message.answer("❌ Неизвестная команда. Введите число 1-4:")
 
