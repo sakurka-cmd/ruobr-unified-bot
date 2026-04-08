@@ -1122,10 +1122,8 @@ async def process_link_code(message: Message, state: FSMContext, user_config: Op
         await message.answer("❌ Ошибка: профиль не найден.")
         return
     
-    # Привязываем: устанавливаем peer_id текущего юзера
-    await link_accounts(user_config.id, peer_id=vk_user.peer_id)
-    # Очищаем старый VK-юзер (у него был только peer_id, теперь он привязан к TG)
-    # Старый VK-запись можно удалить или оставить с NULL peer_id
+    # Merge: set VK peer_id on the TG user's record (avoids UNIQUE constraint conflict)
+    await create_or_update_user(chat_id=user_config.chat_id, peer_id=vk_user.peer_id)
     
     await state.clear()
     

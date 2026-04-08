@@ -381,17 +381,15 @@ async def run_vk_bot(vk_token: str):
                         from bot.database import get_user_by_id
                         tg_user = await get_user_by_id(tg_user_id)
                         if tg_user and tg_user.chat_id:
-                            current = await get_user(peer_id=message.peer_id)
-                            if not current:
-                                current = await create_or_update_user(peer_id=message.peer_id)
-                            if current and current.id:
-                                await link_accounts(current.id, chat_id=tg_user.chat_id)
-                                await message.answer(
-                                    f"✅ Telegram аккаунт привязан! (id: {tg_user.chat_id})\n\n"
-                                    "Теперь уведомления будут приходить и в Telegram.",
-                                    keyboard=get_vk_main_keyboard()
-                                )
-                                return
+                            # Merge: add VK peer_id to TG user's record (has login)
+                            if tg_user.id:
+                                await create_or_update_user(chat_id=tg_user.chat_id, peer_id=message.peer_id)
+                            await message.answer(
+                                "✅ Telegram аккаунт привязан!\n\n"
+                                "Теперь уведомления будут приходить и в Telegram.",
+                                keyboard=get_vk_main_keyboard()
+                            )
+                            return
                     await message.answer("❌ Не удалось привязать. Попробуйте ещё раз.")
                 # Не 8-значный код — идём дальше в FSM
 
@@ -427,17 +425,16 @@ async def run_vk_bot(vk_token: str):
                 if not tg_user or not tg_user.chat_id:
                     await message.answer("⚠️ TG аккаунт найден, но привязка не удалась.")
                     return
-                current = await get_user(peer_id=message.peer_id)
-                if not current:
-                    current = await create_or_update_user(peer_id=message.peer_id)
-                if not current or not current.id:
+                # Merge: add VK peer_id to TG user's record (has login)
+                if tg_user.id:
+                    await create_or_update_user(chat_id=tg_user.chat_id, peer_id=message.peer_id)
+                else:
                     await clear_vk_fsm_state(message.peer_id)
                     await message.answer("❌ Ошибка привязки.")
                     return
-                await link_accounts(current.id, chat_id=tg_user.chat_id)
                 await clear_vk_fsm_state(message.peer_id)
                 await message.answer(
-                    f"✅ Telegram аккаунт привязан! (id: {tg_user.chat_id})\n\n"
+                    "✅ Telegram аккаунт привязан!\n\n"
                     "Теперь уведомления будут приходить и в Telegram.",
                     keyboard=get_vk_main_keyboard()
                 )

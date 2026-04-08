@@ -629,6 +629,8 @@ async def create_or_update_user(
                 updates.append("chat_id = ?")
                 params.append(chat_id)
             if peer_id is not None:
+                # Clear peer_id from other records to avoid UNIQUE constraint violation
+                await conn.execute("UPDATE users SET peer_id = NULL WHERE peer_id = ? AND id != ?", (peer_id, existing_id))
                 updates.append("peer_id = ?")
                 params.append(peer_id)
             if login is not None:
@@ -771,6 +773,12 @@ async def link_accounts(user_id: int, *, chat_id: int = None, peer_id: int = Non
 
         if not updates:
             return False
+
+        # Clear UNIQUE constraint conflicts before updating
+        if chat_id is not None:
+            await conn.execute("UPDATE users SET chat_id = NULL WHERE chat_id = ? AND id != ?", (chat_id, user_id))
+        if peer_id is not None:
+            await conn.execute("UPDATE users SET peer_id = NULL WHERE peer_id = ? AND id != ?", (peer_id, user_id))
 
         params.append(user_id)
         try:
