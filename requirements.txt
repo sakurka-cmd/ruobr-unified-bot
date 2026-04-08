@@ -1,7 +1,10 @@
-# Ruobr Telegram Bot Dependencies
+# Ruobr Unified Bot Dependencies (Telegram + VK)
 
 # Telegram Bot Framework
 aiogram>=3.4.0
+
+# VK Bot Framework
+vkbottle>=4.3.0
 
 # Database
 aiosqlite>=0.19.0
@@ -18,13 +21,4 @@ python-dotenv>=1.0.0
 # HTTP Client (for async requests)
 aiohttp>=3.9.0
 aiohttp-socks>=0.8.0
-
-# Optional: Redis for FSM storage and distributed cache
-# redis>=5.0.0
-# aiogram-redis-storage>=1.0.0
-
-# Development
-# pytest>=7.4.0
-# pytest-asyncio>=0.21.0
-# black>=23.0.0
-# ruff>=0.1.0
+httpx>=0.24.0

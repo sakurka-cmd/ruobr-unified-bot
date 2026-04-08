@@ -12,8 +12,8 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKe
 from ..config import config
 from ..utils.common import is_navigation_command
 from ..credentials import safe_decrypt
-from ..database import get_user, create_or_update_user, UserConfig
-from ..states import LoginStates
+from ..database import get_user, create_or_update_user, UserConfig, create_link_code, consume_link_code, link_accounts, unlink_channel
+from ..states import LoginStates, LinkVKStates
 from ..services import get_children_async, AuthenticationError, get_classmates_for_child, get_achievements_for_child, get_certificate_for_child, get_guide_for_child
 
 logger = logging.getLogger(__name__)
@@ -938,15 +938,248 @@ async def btn_profile(message: Message, user_config: Optional[UserConfig] = None
         return
     
     status = "✅ Настроен" if user_config.login and user_config.password_encrypted else "❌ Не настроен"
-    notif_status = "🔔 Включены" if user_config.enabled else "🔕 Выключены"
-    marks_status = "🔔 Включены" if user_config.marks_enabled else "🔕 Выключены"
     
-    await message.answer(
+    # Кросс-линк VK
+    vk_linked = user_config.peer_id is not None
+    if vk_linked:
+        vk_info = f"  💬 VK: ✅ привязан (id: {user_config.peer_id})"
+    else:
+        vk_info = "  💬 VK: ❌ не привязан"
+    
+    # Клавиатура кросс-линка
+    buttons = []
+    if not vk_linked:
+        buttons.append([InlineKeyboardButton(
+            text="🔗 Привязать VK аккаунт",
+            callback_data="profile_link_vk"
+        )])
+        buttons.append([InlineKeyboardButton(
+            text="📲 Ввести код привязки от VK",
+            callback_data="profile_enter_link_code"
+        )])
+    else:
+        buttons.append([InlineKeyboardButton(
+            text="❌ Отвязать VK аккаунт",
+            callback_data="profile_unlink_vk"
+        )])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    
+    text = (
         f"👤 <b>Ваш профиль</b>\n\n"
         f"<b>Статус:</b> {status}\n"
         f"<b>Логин:</b> {user_config.login or 'не указан'}\n\n"
-        f"<b>Уведомления о балансе:</b> {notif_status}\n"
-        f"<b>Уведомления об оценках:</b> {marks_status}"
+        f"🔗 <b>Связанные аккаунты:</b>\n"
+        f"  📱 Telegram: ✅\n"
+        f"{vk_info}"
+    )
+    
+    if kb:
+        await message.answer(text, reply_markup=kb)
+    else:
+        await message.answer(text)
+
+
+# ===== Кросс-линк VK =====
+
+@router.callback_query(F.data == "profile_link_vk")
+async def cb_profile_link_vk(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
+    """Генерация кода для привязки VK — пользователь отправит код в VK бот."""
+    if user_config is None:
+        user_config = await get_user(callback.message.chat.id)
+    if user_config is None or not user_config.id:
+        await callback.answer("❌ Профиль не найден", show_alert=True)
+        return
+    
+    if user_config.peer_id:
+        await callback.answer("VK уже привязан!", show_alert=True)
+        return
+    
+    code = await create_link_code(user_config.id, source="tg")
+    
+    text = (
+        "🔗 <b>Привязка VK аккаунта</b>\n\n"
+        "1. Откройте VK бот\n"
+        "2. Отправьте команду:\n"
+        f"   <code>/link_tg {code}</code>\n\n"
+        "⏰ Код действителен 10 минут."
+    )
+    
+    await callback.message.edit_text(text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "profile_enter_link_code")
+async def cb_profile_enter_link_code(callback: CallbackQuery, state: FSMContext):
+    """Начало ввода кода от VK бота."""
+    await callback.message.edit_text(
+        "📲 <b>Ввод кода привязки</b>\n\n"
+        "Отправьте код, полученный в VK боте:\n\n"
+        "❌ Отмена — для выхода"
+    )
+    await state.set_state(LinkVKStates.waiting_for_link_code)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "profile_unlink_vk")
+async def cb_profile_unlink_vk(callback: CallbackQuery, user_config: Optional[UserConfig] = None):
+    """Отвязать VK аккаунт."""
+    if user_config is None:
+        user_config = await get_user(callback.message.chat.id)
+    if user_config is None or not user_config.id:
+        await callback.answer("❌ Профиль не найден", show_alert=True)
+        return
+    
+    if not user_config.peer_id:
+        await callback.answer("VK не привязан!", show_alert=True)
+        return
+    
+    await unlink_channel(user_config.id, "vk")
+    
+    text = (
+        "👤 <b>Ваш профиль</b>\n\n"
+        f"<b>Статус:</b> {'✅ Настроен' if user_config.login and user_config.password_encrypted else '❌ Не настроен'}\n"
+        f"<b>Логин:</b> {user_config.login or 'не указан'}\n\n"
+        f"🔗 <b>Связанные аккаунты:</b>\n"
+        f"  📱 Telegram: ✅\n"
+        f"  💬 VK: ❌ не привязан"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔗 Привязать VK аккаунт", callback_data="profile_link_vk")],
+        [InlineKeyboardButton(text="📲 Ввести код привязки от VK", callback_data="profile_enter_link_code")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer("VK отвязан!")
+
+
+@router.message(LinkVKStates.waiting_for_link_code)
+async def process_link_code(message: Message, state: FSMContext, user_config: Optional[UserConfig] = None):
+    """Обработка введённого кода привязки от VK бота."""
+    text = message.text.strip()
+    
+    # Навигационные команды — сбрасываем FSM
+    if is_navigation_command(text):
+        await state.clear()
+        return
+    
+    # Проверка отмены
+    if text == "❌ Отмена" or text == "/cancel":
+        await state.clear()
+        await message.answer("❌ Отменено.", reply_markup=get_settings_keyboard())
+        return
+    
+    if not text or len(text) != 8:
+        await message.answer("❌ Код должен содержать 8 символов. Попробуйте ещё раз:")
+        return
+    
+    code_upper = text.upper().strip()
+    result = await consume_link_code(code_upper)
+    
+    if result is None:
+        await message.answer(
+            "❌ <b>Неверный или просроченный код.</b>\n\n"
+            "Получите новый код в VK боте и попробуйте снова:\n"
+            "• Отправьте /link_tg в VK боте\n"
+            "• Или нажмите 'Привязать VK' в профиле"
+        )
+        return
+    
+    vk_user_id, source = result
+    
+    if source != "vk":
+        await message.answer("❌ Этот код предназначен для VK бота, а не для Telegram.")
+        return
+    
+    # Привязываем peer_id из VK к текущему TG аккаунту
+    # Сначала получаем peer_id из VK-юзера
+    from ..database import get_user_by_id
+    vk_user = await get_user_by_id(vk_user_id)
+    if not vk_user or not vk_user.peer_id:
+        await message.answer(
+            "⚠️ VK аккаунт найден, но привязка не удалась.\n"
+            "Пожалуйста, привяжите VK повторно."
+        )
+        return
+    
+    if user_config is None:
+        user_config = await get_user(message.chat.id)
+    if not user_config or not user_config.id:
+        await state.clear()
+        await message.answer("❌ Ошибка: профиль не найден.")
+        return
+    
+    # Привязываем: устанавливаем peer_id текущего юзера
+    await link_accounts(user_config.id, peer_id=vk_user.peer_id)
+    # Очищаем старый VK-юзер (у него был только peer_id, теперь он привязан к TG)
+    # Старый VK-запись можно удалить или оставить с NULL peer_id
+    
+    await state.clear()
+    
+    updated = await get_user(message.chat.id)
+    vk_linked = updated.peer_id is not None
+    vk_info = f"  💬 VK: ✅ привязан (id: {updated.peer_id})" if vk_linked else "  💬 VK: ❌ не привязан"
+    
+    text = (
+        "✅ <b>VK аккаунт успешно привязан!</b>\n\n"
+        f"👤 <b>Ваш профиль</b>\n\n"
+        f"<b>Статус:</b> {'✅ Настроен' if updated.login and updated.password_encrypted else '❌ Не настроен'}\n"
+        f"<b>Логин:</b> {updated.login or 'не указан'}\n\n"
+        f"🔗 <b>Связанные аккаунты:</b>\n"
+        f"  📱 Telegram: ✅\n"
+        f"{vk_info}"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отвязать VK аккаунт", callback_data="profile_unlink_vk")],
+    ])
+    
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("link_vk"))
+async def cmd_link_vk(message: Message, state: FSMContext):
+    """Команда для ввода кода привязки от VK бота."""
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer(
+            "📲 <b>Привязка VK аккаунта</b>\n\n"
+            "Отправьте код, полученный в VK боте:\n\n"
+            "❌ Отмена — для выхода"
+        )
+        await state.set_state(LinkVKStates.waiting_for_link_code)
+        return
+    
+    code = args[1].strip().upper()
+    result = await consume_link_code(code)
+    
+    if result is None:
+        await message.answer("❌ Неверный или просроченный код.")
+        return
+    
+    vk_user_id, source = result
+    if source != "vk":
+        await message.answer("❌ Этот код предназначен для другого мессенджера.")
+        return
+    
+    from ..database import get_user_by_id
+    vk_user = await get_user_by_id(vk_user_id)
+    if not vk_user or not vk_user.peer_id:
+        await message.answer("⚠️ VK аккаунт найден, но привязка не удалась.")
+        return
+    
+    user_config = await get_user(message.chat.id)
+    if not user_config or not user_config.id:
+        await message.answer("❌ Профиль не найден. Используйте /start")
+        return
+    
+    await link_accounts(user_config.id, peer_id=vk_user.peer_id)
+    
+    updated = await get_user(message.chat.id)
+    await message.answer(
+        f"✅ <b>VK аккаунт привязан!</b> (id: {updated.peer_id})\n\n"
+        "Теперь уведомления будут приходить и в VK."
     )
 
 

@@ -28,3 +28,8 @@ class BirthdaySettingsStates(StatesGroup):
     choosing_mode = State()
     setting_weekday = State()
     setting_time = State()
+
+
+class LinkVKStates(StatesGroup):
+    """Состояния привязки VK аккаунта."""
+    waiting_for_link_code = State()
