@@ -507,7 +507,7 @@ class NotificationService:
                         new_marks.append(m)
                         await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="tg")
                 # VK
-                elif user.peer_id and user.vk_marks_enabled:
+                if user.peer_id and user.vk_marks_enabled:
                     if not await is_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="vk"):
                         new_marks.append(m)
                         await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="vk")
