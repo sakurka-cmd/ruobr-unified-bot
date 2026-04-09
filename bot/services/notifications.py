@@ -192,7 +192,7 @@ class NotificationService:
             await self._vk_api.messages.send(
                 peer_id=peer_id,
                 message=clean,
-                random_id=0
+                random_id=random.randint(1, 2**31)
             )
             logger.info(f"VK notification sent to {peer_id}")
         except Exception as e:
