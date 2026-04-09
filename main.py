@@ -137,9 +137,11 @@ async def main() -> None:
             except asyncio.CancelledError:
                 pass
 
+    vk_polling_task = None
     tasks = [notification_task, cache_cleanup_task, tg_polling()]
     if vk_bot_instance:
-        tasks.append(vk_polling())
+        vk_polling_task = asyncio.create_task(vk_polling())
+        tasks.append(vk_polling_task)
 
     logger.info("All services started. Press Ctrl+C to stop.")
 
@@ -152,6 +154,8 @@ async def main() -> None:
         notification_task.cancel()
         cache_cleanup_task.cancel()
         dp.stop_polling()
+        if vk_polling_task:
+            vk_polling_task.cancel()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -167,6 +171,8 @@ async def main() -> None:
         logger.info("Shutting down...")
         notification_task.cancel()
         cache_cleanup_task.cancel()
+        if vk_polling_task:
+            vk_polling_task.cancel()
         try:
             await notification_task
         except asyncio.CancelledError:
@@ -175,6 +181,11 @@ async def main() -> None:
             await cache_cleanup_task
         except asyncio.CancelledError:
             pass
+        if vk_polling_task:
+            try:
+                await vk_polling_task
+            except asyncio.CancelledError:
+                pass
         await db_pool.close()
         await tg_bot.session.close()
         logger.info("Bot stopped")
