@@ -239,6 +239,7 @@ async def run_vk_bot(vk_token: str):
 
         @vk_labeler.message(text="◀️ Назад")
         async def vk_back(message: Message):
+            await clear_vk_fsm_state(message.peer_id)
             await message.answer("🏠 Главное меню", keyboard=get_vk_main_keyboard())
 
         @vk_labeler.message(text="/balance")
@@ -1036,7 +1037,6 @@ async def run_vk_bot(vk_token: str):
                     child_obj = real_children[selected["idx"]] if real_children and selected["idx"] < len(real_children) else selected
                 except Exception:
                     child_obj = selected
-                await clear_vk_fsm_state(message.peer_id)
                 await _vk_show_classmates(message, login, password, selected["idx"], child_obj)
 
             elif state_name == "info_select_teachers":
@@ -1066,7 +1066,6 @@ async def run_vk_bot(vk_token: str):
                     child_obj = real_children[selected["idx"]] if real_children and selected["idx"] < len(real_children) else selected
                 except Exception:
                     child_obj = selected
-                await clear_vk_fsm_state(message.peer_id)
                 await _vk_show_teachers(message, login, password, selected["idx"], child_obj)
 
             elif state_name == "info_select_achievements":
@@ -1096,7 +1095,6 @@ async def run_vk_bot(vk_token: str):
                     child_obj = real_children[selected["idx"]] if real_children and selected["idx"] < len(real_children) else selected
                 except Exception:
                     child_obj = selected
-                await clear_vk_fsm_state(message.peer_id)
                 await _vk_show_achievements(message, login, password, selected["idx"], child_obj)
 
             elif state_name == "bd_choose_child":
