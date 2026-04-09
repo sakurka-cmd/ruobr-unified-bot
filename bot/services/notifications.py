@@ -499,17 +499,23 @@ class NotificationService:
                         })
 
             new_marks = []
+            seen = set()
             for m in all_marks:
                 notif_key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
+                if notif_key in seen:
+                    continue
                 # TG
                 if user.chat_id and user.marks_enabled:
                     if not await is_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="tg"):
                         new_marks.append(m)
+                        seen.add(notif_key)
                         await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="tg")
                 # VK
                 if user.peer_id and user.vk_marks_enabled:
                     if not await is_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="vk"):
-                        new_marks.append(m)
+                        if notif_key not in seen:
+                            new_marks.append(m)
+                            seen.add(notif_key)
                         await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="vk")
 
             if new_marks:
