@@ -106,7 +106,7 @@ async def cmd_birthday_settings(
         return
 
     # Загружаем настройки для всех детей
-    all_settings = await get_all_birthday_settings(message.chat.id)
+    all_settings = await get_all_birthday_settings(user_config.id)
     settings_map = {s["child_id"]: s for s in all_settings}
 
     # Глобальный статус
@@ -271,11 +271,11 @@ async def cb_toggle_child_enable(callback: CallbackQuery, user_config: Optional[
     child_id = int(parts[2])
     child_index = int(parts[3])
 
-    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    settings = await get_birthday_settings(user_config.id, child_id)
     new_enabled = not settings.get("enabled", False)
 
     await set_birthday_settings(
-        chat_id=callback.message.chat.id,
+        user_id=user_config.id,
         child_id=child_id,
         enabled=new_enabled,
         mode=settings.get("mode", "tomorrow"),
@@ -320,9 +320,9 @@ async def cb_mode_tomorrow(callback: CallbackQuery, user_config: Optional[UserCo
     await callback.answer()
 
     # Сохраняем режим
-    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    settings = await get_birthday_settings(user_config.id, child_id)
     await set_birthday_settings(
-        chat_id=callback.message.chat.id,
+        user_id=user_config.id,
         child_id=child_id,
         enabled=True,
         mode="tomorrow",
@@ -354,9 +354,9 @@ async def cb_mode_weekly(callback: CallbackQuery, user_config: Optional[UserConf
     await callback.answer()
 
     # Сохраняем режим
-    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    settings = await get_birthday_settings(user_config.id, child_id)
     await set_birthday_settings(
-        chat_id=callback.message.chat.id,
+        user_id=user_config.id,
         child_id=child_id,
         enabled=True,
         mode="weekly",
@@ -386,9 +386,10 @@ async def cb_set_weekday(callback: CallbackQuery):
 
     await callback.answer()
 
-    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    user = await get_user(callback.message.chat.id)
+    settings = await get_birthday_settings(user.id if user else callback.message.chat.id, child_id)
     await set_birthday_settings(
-        chat_id=callback.message.chat.id,
+        user_id=user.id if user else callback.message.chat.id,
         child_id=child_id,
         enabled=True,
         mode="weekly",
@@ -418,10 +419,11 @@ async def cb_set_hour(callback: CallbackQuery):
 
     await callback.answer()
 
+    user = await get_user(callback.message.chat.id)
     # Сохраняем выбранный час в БД, чтобы cb_set_minute мог его прочитать
-    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    settings = await get_birthday_settings(user.id if user else callback.message.chat.id, child_id)
     await set_birthday_settings(
-        chat_id=callback.message.chat.id,
+        user_id=user.id if user else callback.message.chat.id,
         child_id=child_id,
         enabled=True,
         mode=settings.get("mode", "tomorrow"),
@@ -451,12 +453,13 @@ async def cb_set_minute(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()
 
-    settings = await get_birthday_settings(callback.message.chat.id, child_id)
+    user = await get_user(callback.message.chat.id)
+    settings = await get_birthday_settings(user.id if user else callback.message.chat.id, child_id)
     hour = settings.get("notify_hour", 7)
 
     # Сохраняем финальные настройки
     await set_birthday_settings(
-        chat_id=callback.message.chat.id,
+        user_id=user.id if user else callback.message.chat.id,
         child_id=child_id,
         enabled=True,
         mode=settings.get("mode", "tomorrow"),
@@ -518,7 +521,7 @@ async def _show_child_settings_screen(
         return
 
     child = children[child_index]
-    settings = await get_birthday_settings(callback.message.chat.id, child.id)
+    settings = await get_birthday_settings(user_config.id, child.id)
 
     is_enabled = settings.get("enabled", False)
     mode = settings.get("mode", "tomorrow")
@@ -584,7 +587,7 @@ async def _show_birthday_menu(callback: CallbackQuery, user_config: UserConfig, 
         await callback.message.edit_text("❌ Дети не найдены.")
         return
 
-    all_settings = await get_all_birthday_settings(user_config.chat_id)
+    all_settings = await get_all_birthday_settings(user_config.id)
     settings_map = {s["child_id"]: s for s in all_settings}
 
     global_status = "✅ ВКЛ" if user_config.birthday_enabled else "❌ ВЫКЛ"
