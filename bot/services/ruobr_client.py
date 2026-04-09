@@ -741,7 +741,7 @@ async def get_food_for_children(
     Получение информации о питании для всех детей.
 
     Использует один клиент RuobrClient с единой авторизацией.
-    Запросы для разных детей выполняются параллельно через asyncio.gather.
+    Запросы для разных детей выполняются последовательно (одна авторизация).
 
     Args:
         login: Логин Ruobr.
@@ -755,33 +755,17 @@ async def get_food_for_children(
 
     try:
         async with RuobrClient(login, password) as client:
-
-            async def fetch_food(child: Child, idx: int) -> tuple:
-                # URL вычисляется синхронно (до await), поэтому
-                # параллельное выполнение с разными set_child безопасно
-                client.set_child(idx)
-                food = await client.get_food_info(child_id=child.id)
-                return child.id, food
-
-            tasks = [fetch_food(child, idx) for idx, child in enumerate(children)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for idx, child in enumerate(children):
+                try:
+                    client.set_child(idx)
+                    food = await client.get_food_info(child_id=child.id)
+                    food_info[child.id] = food
+                except (AuthenticationError, NetworkError, RuobrError) as e:
+                    logger.error(f"Error fetching food info for child {child.id}: {e}")
 
     except (AuthenticationError, NetworkError) as e:
         logger.error(f"Error creating client for food: {e}")
         return food_info
-
-    # Re-raise first error if ALL tasks failed
-    errors = [r for r in results if isinstance(r, RuobrError)]
-    if errors and len(errors) == len(results):
-        logger.error(f"All food requests failed for {len(children)} children")
-        raise errors[0]
-
-    for result in results:
-        if isinstance(result, Exception):
-            logger.error(f"Error fetching food info: {result}")
-        else:
-            child_id, info = result
-            food_info[child_id] = info
 
     return food_info
 
@@ -797,7 +781,7 @@ async def get_timetable_for_children(
     Получение расписания для всех детей.
 
     Использует один клиент RuobrClient с единой авторизацией.
-    Запросы для разных детей выполняются параллельно через asyncio.gather.
+    Запросы для разных детей выполняются последовательно (одна авторизация).
 
     Args:
         login: Логин Ruobr.
@@ -813,31 +797,17 @@ async def get_timetable_for_children(
 
     try:
         async with RuobrClient(login, password) as client:
-
-            async def fetch_timetable(child: Child, idx: int) -> tuple:
-                client.set_child(idx)
-                lessons = await client.get_timetable(start, end)
-                return child.id, lessons
-
-            tasks = [fetch_timetable(child, idx) for idx, child in enumerate(children)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for idx, child in enumerate(children):
+                try:
+                    client.set_child(idx)
+                    lessons = await client.get_timetable(start, end)
+                    timetable[child.id] = lessons
+                except (AuthenticationError, NetworkError, RuobrError) as e:
+                    logger.error(f"Error fetching timetable for child {child.id}: {e}")
 
     except (AuthenticationError, NetworkError) as e:
         logger.error(f"Error creating client for timetable: {e}")
         return timetable
-
-    # Re-raise first error if ALL tasks failed
-    errors = [r for r in results if isinstance(r, RuobrError)]
-    if errors and len(errors) == len(results):
-        logger.error(f"All timetable requests failed for {len(children)} children")
-        raise errors[0]
-
-    for result in results:
-        if isinstance(result, Exception):
-            logger.error(f"Error fetching timetable: {result}")
-        else:
-            child_id, lessons = result
-            timetable[child_id] = lessons
 
     return timetable
 
