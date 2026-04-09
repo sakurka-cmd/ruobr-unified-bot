@@ -107,7 +107,8 @@ async def _vk_show_classmates(message, login, password, child_idx, child):
             lines.append(f"{i:2}. {c.full_name} {icon} | {bd_str} | {age} лет")
         await message.answer(truncate_text("\n".join(lines)))
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        logger.error(f"VK handler error: {e}", exc_info=True)
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 
 async def _vk_show_teachers(message, login, password, child_idx, child):
@@ -136,7 +137,8 @@ async def _vk_show_teachers(message, login, password, child_idx, child):
             lines.append("Предметники не найдены.")
         await message.answer(truncate_text("\n".join(lines)))
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        logger.error(f"VK handler error: {e}", exc_info=True)
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 
 async def _vk_show_achievements(message, login, password, child_idx, child):
@@ -192,7 +194,8 @@ async def _vk_show_achievements(message, login, password, child_idx, child):
 
         await message.answer(truncate_text("\n".join(lines)))
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        logger.error(f"VK handler error: {e}", exc_info=True)
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 
 # ===== VK Handler Registration =====
@@ -315,7 +318,8 @@ def register_handlers(vk_labeler):
                     lines.append(f"{idx}. {child.full_name} ({child.group}): питание недоступно")
             await message.answer("\n".join(lines))
         except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+            logger.error(f"VK handler error: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     @vk_labeler.message(text="📅 Расписание сегодня")
     async def vk_ttoday(message: Message):
@@ -343,7 +347,8 @@ def register_handlers(vk_labeler):
                         lines.append(format_lesson(lesson, show_details=True))
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На сегодня расписания нет.")
         except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+            logger.error(f"VK handler error: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     @vk_labeler.message(text="📅 Расписание завтра")
     async def vk_ttomorrow(message: Message):
@@ -371,7 +376,8 @@ def register_handlers(vk_labeler):
                         lines.append(format_lesson(lesson, show_details=True))
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На завтра расписания нет.")
         except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+            logger.error(f"VK handler error: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     @vk_labeler.message(text="🍽 Питание сегодня")
     async def vk_food(message: Message):
@@ -399,7 +405,8 @@ def register_handlers(vk_labeler):
                             lines.append(format_food_visit(visit, child.full_name))
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На сегодня питания не найдено.")
         except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+            logger.error(f"VK handler error: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     # ===== Оценки сегодня =====
     @vk_labeler.message(text="⭐ Оценки сегодня")
@@ -436,7 +443,8 @@ def register_handlers(vk_labeler):
                         lines.append(f"  {lesson.subject}: {question_type} → {value}")
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ За сегодня оценок не найдено.")
         except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+            logger.error(f"VK handler error: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     # ===== ДЗ на завтра =====
     @vk_labeler.message(text="📘 ДЗ на завтра")
@@ -487,7 +495,8 @@ def register_handlers(vk_labeler):
                             lines.append(f"     📝 {clean_text}")
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На завтра домашнее задание не найдено.")
         except Exception as e:
-            await message.answer(f"❌ Ошибка: {e}")
+            logger.error(f"VK handler error: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     # ===== Информация: Одноклассники =====
     @vk_labeler.message(text="👥 Одноклассники")
