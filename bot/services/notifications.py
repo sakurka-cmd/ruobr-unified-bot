@@ -599,12 +599,12 @@ class NotificationService:
                 last_hour = self._last_birthday_check_hour.get(bh_key, -1)
                 if last_hour == current_hour:
                     continue
-                self._last_birthday_check_hour[bh_key] = current_hour
 
                 # Получаем настройки ДР для этого канала
                 bday_users = await get_users_with_birthday_notifications()
                 relevant = [b for b in bday_users if b["user_id"] == uid and b["channel"] == channel]
                 if not relevant:
+                    self._last_birthday_check_hour[bh_key] = current_hour
                     continue
 
                 for child_idx, child in enumerate(children):
@@ -622,13 +622,17 @@ class NotificationService:
 
                     if now.hour != notify_hour or now.minute < notify_minute:
                         continue
-                    if now.minute > notify_minute + 2:
+                    if now.minute > notify_minute + 10:
                         continue
 
                     if mode == "tomorrow":
                         await self._process_tomorrow_mode(user, child, child_idx, now, tz, login, password, channel)
                     elif mode == "weekly":
                         await self._process_weekly_mode(user, child, child_idx, now, tz, login, password, channel)
+
+                # Mark hour as checked only if we had relevant settings
+                # (avoid re-querying DB every 5 min for users without birthday config)
+                self._last_birthday_check_hour[bh_key] = current_hour
 
         except Exception as e:
             logger.error(f"Error checking birthday for user {uid}: {e}", exc_info=True)
