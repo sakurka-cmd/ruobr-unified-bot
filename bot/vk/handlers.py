@@ -283,7 +283,7 @@ def register_handlers(vk_labeler):
             return
         try:
             food_info = await get_food_for_children(login, password, children)
-            thresholds = await get_all_thresholds_for_chat(peer_id=message.peer_id)
+            thresholds = await get_all_thresholds_for_chat(user_id=user.id)
             lines = ["💰 Баланс питания\n"]
             for idx, child in enumerate(children, 1):
                 info = food_info.get(child.id)
@@ -624,10 +624,10 @@ def register_handlers(vk_labeler):
         if not children:
             await message.answer("❌ Дети не найдены.")
             return
-        thresholds = await get_all_thresholds_for_chat(peer_id=message.peer_id)
+        thresholds = await get_all_thresholds_for_chat(user_id=user.id)
         lines = ["💰 Настройка порога баланса\n"]
         for idx, child in enumerate(children, 1):
-            threshold = thresholds.get(child.id, 300)
+            threshold = thresholds.get(child.id, config.default_balance_threshold)
             lines.append(f"{idx}. {child.full_name} ({child.group}) — порог {threshold:.0f} ₽")
         lines.append(f"\nВыберите ребёнка:")
 
@@ -836,7 +836,9 @@ def register_handlers(vk_labeler):
                 await clear_vk_fsm_state(message.peer_id)
                 await message.answer("❌ Ошибка. Попробуйте заново.", keyboard=get_vk_main_keyboard())
                 return
-            await db_set_threshold(message.peer_id, child_id, value)
+            user = await get_user(peer_id=message.peer_id)
+            uid = user.id if user and user.id else message.peer_id
+            await db_set_threshold(uid, child_id, value)
             await clear_vk_fsm_state(message.peer_id)
             await message.answer(
                 f"✅ Порог установлен!\n\n"
