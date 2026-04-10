@@ -66,6 +66,7 @@ def setup_logging() -> None:
     logging.getLogger("aiogram").setLevel(logging.INFO)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("vkbottle").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 logger = logging.getLogger(__name__)
