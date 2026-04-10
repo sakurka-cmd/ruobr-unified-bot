@@ -110,7 +110,7 @@ class FoodInfo:
             val = data.get(key)
             if val and isinstance(val, list) and len(val) > 0:
                 visits = val
-                logger.info(f"FoodInfo: found visits under key '{key}' ({len(visits)} items)")
+                logger.debug(f"FoodInfo: found visits under key '{key}' ({len(visits)} items)")
                 break
 
         # Если не нашли по известным ключам — ищем любой список со словарями,
@@ -124,7 +124,7 @@ class FoodInfo:
                     first_keys = set(value[0].keys())
                     if first_keys & visit_like_keys:
                         visits = value
-                        logger.info(f"FoodInfo: auto-detected visits under key '{key}' ({len(visits)} items), fields: {list(first_keys)}")
+                        logger.debug(f"FoodInfo: auto-detected visits under key '{key}' ({len(visits)} items), fields: {list(first_keys)}")
                         break
 
         if not visits:
@@ -137,13 +137,13 @@ class FoodInfo:
                 if isinstance(value, list):
                     sample = value[0] if value else None
                     if isinstance(sample, dict):
-                        logger.info(f"  {key}: list[{len(value)}], first item keys: {list(sample.keys())}")
+                        logger.debug(f"  {key}: list[{len(value)}], first item keys: {list(sample.keys())}")
                     else:
-                        logger.info(f"  {key}: list[{len(value)}], item type: {type(sample).__name__}")
+                        logger.debug(f"  {key}: list[{len(value)}], item type: {type(sample).__name__}")
                 elif isinstance(value, dict):
-                    logger.info(f"  {key}: dict, keys: {list(value.keys())[:10]}")
+                    logger.debug(f"  {key}: dict, keys: {list(value.keys())[:10]}")
                 else:
-                    logger.info(f"  {key}: {type(value).__name__} = {str(value)[:200]}")
+                    logger.debug(f"  {key}: {type(value).__name__} = {str(value)[:200]}")
 
         return cls(
             child_id=child_id,
@@ -661,7 +661,7 @@ class RuobrClient:
 
         # Логируем полную структуру для отладки
         import json
-        logger.info(f"Achievements raw response: {json.dumps(result, ensure_ascii=False)[:3000]}")
+        logger.debug(f"Achievements raw response: {json.dumps(result, ensure_ascii=False)[:3000]}")
 
         return Achievements.from_dict(result)
 
@@ -680,7 +680,7 @@ class RuobrClient:
 
         # Логируем полную структуру для отладки
         import json
-        logger.info(f"Certificate raw response: {json.dumps(result, ensure_ascii=False)[:3000]}")
+        logger.debug(f"Certificate raw response: {json.dumps(result, ensure_ascii=False)[:3000]}")
 
         return Certificate.from_dict(result)
 
