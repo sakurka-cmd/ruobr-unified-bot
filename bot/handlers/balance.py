@@ -23,7 +23,7 @@ from ..services import (
     invalidate_user_cache
 )
 from ..utils.formatters import (
-    format_balance, format_date, truncate_text,
+    format_balance, format_date, normalize_date_to_iso, truncate_text,
     extract_dish_names, parse_complex_menu
 )
 from ..utils.common import is_navigation_command
@@ -176,7 +176,7 @@ async def cmd_foodtoday(message: Message, user_config: Optional[UserConfig] = No
             child_visits = []
             for visit in info.visits:
                 vdate = visit.get("date", "")
-                if vdate != today_str:
+                if normalize_date_to_iso(vdate) != today_str:
                     continue
                 child_visits.append(visit)
             

@@ -158,6 +158,47 @@ def format_date(date_str: str) -> str:
         return date_str
 
 
+def normalize_date_to_iso(date_str):
+    """
+    Нормализация строки даты в формат YYYY-MM-DD.
+
+    Поддерживаемые входные форматы:
+    - YYYY-MM-DD (уже ISO)
+    - YYYY-MM-DDTHH:MM:SS или YYYY-MM-DD HH:MM:SS
+    - DD.MM.YYYY
+
+    Args:
+        date_str: Строка с датой в произвольном формате.
+
+    Returns:
+        Дата в формате YYYY-MM-DD или исходная строка, если парсинг не удался.
+    """
+    if not date_str:
+        return ""
+
+    date_str = str(date_str).strip()
+
+    # Уже в ISO формате (YYYY-MM-DD)
+    if len(date_str) == 10 and date_str[4] == "-" and date_str[7] == "-":
+        return date_str
+
+    # С временем: YYYY-MM-DDTHH:MM:SS или YYYY-MM-DD HH:MM:SS
+    for sep in ["T", " "]:
+        if sep in date_str:
+            date_str = date_str.split(sep)[0]
+            return date_str
+
+    # DD.MM.YYYY
+    for fmt in ["%d.%m.%Y", "%d/%m.%Y", "%d/%m/%Y"]:
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(date_str, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return date_str
+
 def format_datetime(dt: datetime) -> str:
     """
     Форматирование datetime в читаемый вид.

@@ -22,7 +22,7 @@ from bot.services import (
     get_certificate_for_child, get_guide_for_child,
 )
 from bot.utils.formatters import (
-    format_balance, format_food_visit, format_date, format_lesson, format_mark,
+    format_balance, format_food_visit, format_date, format_lesson, format_mark, normalize_date_to_iso,
     format_weekday, truncate_text, clean_html_text, has_meaningful_text,
     extract_homework_files,
 )
@@ -400,7 +400,7 @@ def register_handlers(vk_labeler):
                 info = food_info.get(child.id)
                 if info and info.visits:
                     for visit in info.visits:
-                        if visit.get("date") == today_str and (visit.get("ordered") or visit.get("state") == 30):
+                        if normalize_date_to_iso(visit.get("date", "")) == today_str and (visit.get("ordered") or visit.get("state") == 30):
                             found = True
                             lines.append(format_food_visit(visit, child.full_name))
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На сегодня питания не найдено.")
