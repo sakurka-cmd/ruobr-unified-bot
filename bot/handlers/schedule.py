@@ -206,18 +206,18 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
         )
         
         # DEBUG: логируем все уроки с ДЗ
-        logger.info(f"HW check: tomorrow={tomorrow_str}, children={len(children)}")
+        logger.debug(f"HW check: tomorrow={tomorrow_str}, children={len(children)}")
         for child in children:
             lessons = timetable.get(child.id, [])
             for lesson in lessons:
                 if lesson.homework:
-                    logger.info(
+                    logger.debug(
                         f"HW lesson: child={child.id} date={lesson.date} "
                         f"subject={lesson.subject} hw_count={len(lesson.homework)}"
                     )
                     for hw in lesson.homework:
                         dl = hw.get("deadline", "")
-                        logger.info(f"  HW item: keys={list(hw.keys())} deadline={dl!r}")
+                        logger.debug(f"  HW item: keys={list(hw.keys())} deadline={dl!r}")
         
         lines = [f"📘 <b>Домашнее задание на завтра</b> ({format_date(tomorrow_str)})"]
         found = False
@@ -247,7 +247,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                         for hw in lesson.homework:
                             raw_dl = hw.get("deadline", "")
                             norm_dl = normalize_date_to_iso(raw_dl)
-                            logger.info(
+                            logger.debug(
                                 f"HW filtered out: subject={lesson.subject}, "
                                 f"lesson_date={lesson.date}, tomorrow={tomorrow_str}, "
                                 f"raw_deadline={raw_dl!r}, normalized_deadline={norm_dl!r}"
