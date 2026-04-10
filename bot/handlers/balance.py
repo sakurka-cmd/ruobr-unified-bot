@@ -78,7 +78,7 @@ async def require_authentication(
         return None
     except RuobrError as e:
         logger.error(f"Ruobr API error for user {message.chat.id}: {e}")
-        await message.answer(f"❌ Ошибка доступа к Ruobr: {e}")
+        await message.answer("❌ Ошибка доступа к Ruobr. Попробуйте позже.")
         return None
     
     if not children:

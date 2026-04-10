@@ -279,7 +279,7 @@ async def get_children_or_select(message: Message, user_config: UserConfig, acti
         
     except Exception as e:
         logger.error(f"Error getting children: {e}")
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
         return None
 
 
@@ -362,7 +362,7 @@ async def show_classmates(message: Message, login: str, password: str, child_ind
             
     except Exception as e:
         logger.error(f"Error getting classmates: {e}")
-        await status_msg.edit_text(f"❌ Ошибка: {e}")
+        await status_msg.edit_text("❌ Произошла ошибка. Попробуйте позже.")
 
 
 async def show_teachers(message: Message, login: str, password: str, child_index: int, child_name: str):
@@ -411,7 +411,7 @@ async def show_teachers(message: Message, login: str, password: str, child_index
             
     except Exception as e:
         logger.error(f"Error getting teachers: {e}")
-        await status_msg.edit_text(f"❌ Ошибка: {e}")
+        await status_msg.edit_text("❌ Произошла ошибка. Попробуйте позже.")
 
 
 def _format_program(p) -> str:
@@ -593,7 +593,7 @@ async def show_achievements(message: Message, login: str, password: str, child_i
             
     except Exception as e:
         logger.error(f"Error getting achievements: {e}")
-        await status_msg.edit_text(f"❌ Ошибка: {e}")
+        await status_msg.edit_text("❌ Произошла ошибка. Попробуйте позже.")
 
 
 @router.message(F.text == "👥 Одноклассники")
@@ -782,7 +782,7 @@ async def cb_classmates_select(callback: CallbackQuery, user_config: Optional[Us
     except Exception as e:
         logger.error(f"Error in cb_classmates_select: {e}")
         try:
-            await callback.message.edit_text(f"❌ Ошибка: {e}")
+            await callback.message.edit_text("❌ Произошла ошибка. Попробуйте позже.")
         except Exception:
             logger.debug("Failed to send error message to user")
 
@@ -858,7 +858,7 @@ async def cb_teachers_select(callback: CallbackQuery, user_config: Optional[User
     except Exception as e:
         logger.error(f"Error in cb_teachers_select: {e}")
         try:
-            await callback.message.edit_text(f"❌ Ошибка: {e}")
+            await callback.message.edit_text("❌ Произошла ошибка. Попробуйте позже.")
         except Exception:
             logger.debug("Failed to send error message to user")
 
@@ -918,7 +918,7 @@ async def cb_achievements_select(callback: CallbackQuery, user_config: Optional[
     except Exception as e:
         logger.error(f"Error in cb_achievements_select: {e}")
         try:
-            await callback.message.edit_text(f"❌ Ошибка: {e}")
+            await callback.message.edit_text("❌ Произошла ошибка. Попробуйте позже.")
         except Exception:
             logger.debug("Failed to send error message to user")
 
