@@ -113,6 +113,8 @@ class DatabasePool:
         for _ in range(self._pool_size):
             conn = await aiosqlite.connect(self._db_path)
             conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA busy_timeout=5000")
             self._pool.append(conn)
 
         await self._init_schema()
@@ -456,6 +458,8 @@ class DatabasePool:
             else:
                 conn = await aiosqlite.connect(self._db_path)
                 conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA busy_timeout=5000")
 
             yield conn
         finally:
