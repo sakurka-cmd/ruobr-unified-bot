@@ -475,10 +475,11 @@ class NotificationService:
                 if user.peer_id and user.vk_marks_enabled:
                     channels_to_check.append("vk")
                 if channels_to_check:
-                    has_any = any(
-                        await is_notification_sent(user_id=uid, notification_type="mark", notification_key=sample_key, channel=ch)
-                        for ch in channels_to_check
-                    )
+                    has_any = False
+                    for ch in channels_to_check:
+                        if await is_notification_sent(user_id=uid, notification_type="mark", notification_key=sample_key, channel=ch):
+                            has_any = True
+                            break
                     if not has_any:
                         # No history found — this is a new user, mark ALL current marks as seen
                         for m in all_marks:
