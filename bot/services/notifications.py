@@ -6,6 +6,7 @@
 """
 import asyncio
 import random
+import re
 import time
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -153,7 +154,6 @@ class NotificationService:
             return
         try:
             # Убираем HTML-теги для VK
-            import re
             clean = re.sub(r'<[^>]+>', '', text)
             await self._vk_api.messages.send(
                 peer_id=peer_id,
@@ -394,7 +394,8 @@ class NotificationService:
     async def _check_balance(self, user: UserConfig, children: List[Child], food_info: Dict[int, FoodInfo], thresholds: Dict[int, float]) -> None:
         uid = user.id
         try:
-            alerts = []
+            tg_balance_alerts = []
+            vk_balance_alerts = []
             new_balances: Dict[int, float] = {}
 
             for child in children:
@@ -423,23 +424,28 @@ class NotificationService:
                         if not tg_sent and not vk_sent:
                             continue
 
-                        alert = (
+                        alert_text = (
                             f"⚠️ {child.full_name} ({child.group}):\n"
                             f"  💰 Баланс: <b>{balance:.0f} ₽</b>\n"
                             f"  📉 Порог: {threshold:.0f} ₽\n"
                             f"  ❗ Необходимо пополнить счёт!"
                         )
-                        alerts.append(alert)
                         if tg_sent:
+                            tg_balance_alerts.append(alert_text)
                             await mark_notification_sent(user_id=uid, notification_type="balance", notification_key=notif_key, channel="tg")
                         if vk_sent:
+                            vk_balance_alerts.append(alert_text)
                             await mark_notification_sent(user_id=uid, notification_type="balance", notification_key=notif_key, channel="vk")
 
             self._prev_balances[uid] = new_balances
 
-            if alerts:
-                text = "⚠️ <b>Низкий баланс питания!</b>\n\n" + "\n\n".join(alerts)
-                await self._send_to_user(user, text)
+            # Send to each channel independently to prevent cross-channel duplicates
+            if tg_balance_alerts and user.chat_id:
+                text = "⚠️ <b>Низкий баланс питания!</b>\n\n" + "\n\n".join(tg_balance_alerts)
+                await self._send_tg(user.chat_id, text)
+            if vk_balance_alerts and user.peer_id:
+                text = "⚠️ <b>Низкий баланс питания!</b>\n\n" + "\n\n".join(vk_balance_alerts)
+                await self._send_vk(user.peer_id, text)
 
         except Exception as e:
             logger.error(f"Error checking balance for user {uid}: {e}")
@@ -464,8 +470,8 @@ class NotificationService:
                             "question_id": mark.get("question_id")
                         })
 
-            # Lazy baseline: if user has no mark history, mark all current marks
-            # as seen silently to prevent flood on first check after enabling notifications
+            # Lazy baseline: if user has no mark history for a channel,
+            # mark all current marks as seen silently to prevent flood
             if all_marks:
                 sample_key = f"{all_marks[0]['date']}|{all_marks[0]['subject']}|{all_marks[0]['question_id']}|{all_marks[0]['value']}"
                 channels_to_check = []
@@ -474,50 +480,57 @@ class NotificationService:
                 if user.peer_id and user.vk_marks_enabled:
                     channels_to_check.append("vk")
                 if channels_to_check:
-                    has_any = False
+                    # Check each channel independently
+                    need_baseline_return = False
                     for ch in channels_to_check:
-                        if await is_notification_sent(user_id=uid, notification_type="mark", notification_key=sample_key, channel=ch):
-                            has_any = True
-                            break
-                    if not has_any:
-                        # No history found — this is a new user, mark ALL current marks as seen
-                        for m in all_marks:
-                            notif_key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
-                            for ch in channels_to_check:
+                        has_any = await is_notification_sent(user_id=uid, notification_type="mark", notification_key=sample_key, channel=ch)
+                        if not has_any:
+                            # No history for this channel — mark ALL marks as seen
+                            for m in all_marks:
+                                notif_key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
                                 await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel=ch)
-                        logger.info(f"Lazy marks baseline: {len(all_marks)} marks for user {uid}")
-                        return  # nothing to send — all existing marks are now "seen"
+                            logger.info(f"Lazy marks baseline: {len(all_marks)} marks for user {uid}, channel={ch}")
+                            need_baseline_return = True
+                    if need_baseline_return:
+                        return  # nothing to send — all existing marks are now "seen" for channels without history
 
-            new_marks = []
-            seen = set()
+            tg_new_marks = []
+            vk_new_marks = []
+            tg_seen = set()
+            vk_seen = set()
             for m in all_marks:
                 notif_key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
-                if notif_key in seen:
-                    continue
                 # TG
-                if user.chat_id and user.marks_enabled:
+                if user.chat_id and user.marks_enabled and notif_key not in tg_seen:
+                    tg_seen.add(notif_key)
                     if not await is_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="tg"):
-                        new_marks.append(m)
-                        seen.add(notif_key)
+                        tg_new_marks.append(m)
                         await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="tg")
                 # VK
-                if user.peer_id and user.vk_marks_enabled:
+                if user.peer_id and user.vk_marks_enabled and notif_key not in vk_seen:
+                    vk_seen.add(notif_key)
                     if not await is_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="vk"):
-                        if notif_key not in seen:
-                            new_marks.append(m)
-                            seen.add(notif_key)
+                        vk_new_marks.append(m)
                         await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel="vk")
 
-            if new_marks:
-                lines = ["⭐ <b>Новые оценки!</b>\n"]
-                for m in new_marks:
-                    lines.append(
-                        f"👤 {m['child_name']} ({m['child_group']})\n"
-                        f"📚 {m['subject']}: {m['question_type']} → <b>{m['value']}</b>\n"
-                        f"📅 {m['date']}"
-                    )
-                text = truncate_text("\n".join(lines))
-                await self._send_to_user(user, text)
+            # Send to each channel independently to prevent cross-channel duplicates
+            for ch, ch_marks, ch_id in [
+                ("tg", tg_new_marks, user.chat_id),
+                ("vk", vk_new_marks, user.peer_id),
+            ]:
+                if ch_marks and ch_id:
+                    lines = ["⭐ <b>Новые оценки!</b>\n"]
+                    for m in ch_marks:
+                        lines.append(
+                            f"👤 {m['child_name']} ({m['child_group']})\n"
+                            f"📚 {m['subject']}: {m['question_type']} → <b>{m['value']}</b>\n"
+                            f"📅 {m['date']}"
+                        )
+                    text = truncate_text("\n".join(lines))
+                    if ch == "tg":
+                        await self._send_tg(ch_id, text)
+                    else:
+                        await self._send_vk(ch_id, text)
 
         except Exception as e:
             logger.error(f"Error checking marks for user {uid}: {e}")
@@ -529,7 +542,8 @@ class NotificationService:
         try:
             today_str = date.today().strftime("%Y-%m-%d")
             logger.info(f"Food check for user {uid}, date={today_str}, children={len(children)}")
-            alerts = []
+            tg_food_alerts = []
+            vk_food_alerts = []
 
             for child in children:
                 info = food_info.get(child.id)
@@ -584,23 +598,30 @@ class NotificationService:
                     if not dish_names:
                         dish_names = parse_complex_menu(visit.get("qs_unit", []))
 
-                    msg_lines = [f"🍽 <b>{child.full_name}</b> ({child.group})"]
-                    msg_lines.append(f"🕐 {meal_type}")
+                    alert_text = "\n".join([
+                        f"🍽 <b>{child.full_name}</b> ({child.group})",
+                        f"🕐 {meal_type}",
+                    ])
                     if dish_names:
-                        msg_lines.append("📋 <b>Меню:</b>")
+                        alert_text += "\n📋 <b>Меню:</b>"
                         for dish in dish_names:
-                            msg_lines.append(f"  • {dish}")
-                    msg_lines.append(f"💰 Списано: <b>{price:.0f} ₽</b>")
-                    alerts.append("\n".join(msg_lines))
+                            alert_text += f"\n  • {dish}"
+                    alert_text += f"\n💰 Списано: <b>{price:.0f} ₽</b>"
 
                     if tg_new:
+                        tg_food_alerts.append(alert_text)
                         await mark_notification_sent(user_id=uid, notification_type="food", notification_key=visit_key, channel="tg")
                     if vk_new:
+                        vk_food_alerts.append(alert_text)
                         await mark_notification_sent(user_id=uid, notification_type="food", notification_key=visit_key, channel="vk")
 
-            if alerts:
-                text = f"🍽 <b>Ребёнок поел!</b> ({today_str})\n\n" + "\n\n".join(alerts)
-                await self._send_to_user(user, text)
+            # Send to each channel independently to prevent cross-channel duplicates
+            if tg_food_alerts and user.chat_id:
+                text = f"🍽 <b>Ребёнок поел!</b> ({today_str})\n\n" + "\n\n".join(tg_food_alerts)
+                await self._send_tg(user.chat_id, text)
+            if vk_food_alerts and user.peer_id:
+                text = f"🍽 <b>Ребёнок поел!</b> ({today_str})\n\n" + "\n\n".join(vk_food_alerts)
+                await self._send_vk(user.peer_id, text)
 
         except Exception as e:
             logger.error(f"Error checking food for user {uid}: {e}", exc_info=True)
