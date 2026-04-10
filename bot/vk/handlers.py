@@ -751,8 +751,7 @@ def register_handlers(vk_labeler):
         if text.startswith("💰 Баланс:"):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
             new_val = not user.vk_balance_enabled
-            await create_or_update_user(peer_id=message.peer_id, vk_balance_enabled=new_val)
-            user = await get_user(peer_id=message.peer_id)
+            user = await create_or_update_user(peer_id=message.peer_id, vk_balance_enabled=new_val)
             await message.answer(
                 f"💰 Уведомления о балансе: {'включены ✅' if new_val else 'выключены ❌'}",
                 keyboard=get_vk_notifications_keyboard(user)
@@ -762,8 +761,7 @@ def register_handlers(vk_labeler):
         if text.startswith("⭐ Оценки:"):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
             new_val = not user.vk_marks_enabled
-            await create_or_update_user(peer_id=message.peer_id, vk_marks_enabled=new_val)
-            user = await get_user(peer_id=message.peer_id)
+            user = await create_or_update_user(peer_id=message.peer_id, vk_marks_enabled=new_val)
             await message.answer(
                 f"⭐ Уведомления об оценках: {'включены ✅' if new_val else 'выключены ❌'}",
                 keyboard=get_vk_notifications_keyboard(user)
@@ -773,8 +771,7 @@ def register_handlers(vk_labeler):
         if text.startswith("🍽 Питание:"):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
             new_val = not user.vk_food_enabled
-            await create_or_update_user(peer_id=message.peer_id, vk_food_enabled=new_val)
-            user = await get_user(peer_id=message.peer_id)
+            user = await create_or_update_user(peer_id=message.peer_id, vk_food_enabled=new_val)
             await message.answer(
                 f"🍽 Уведомления о питании: {'включены ✅' if new_val else 'выключены ❌'}",
                 keyboard=get_vk_notifications_keyboard(user)
@@ -784,8 +781,7 @@ def register_handlers(vk_labeler):
         if text.startswith("🎂 Дни рождения:"):
             user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
             new_val = not getattr(user, 'vk_birthday_enabled', False)
-            await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=new_val)
-            user = await get_user(peer_id=message.peer_id)
+            user = await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=new_val)
             await message.answer(
                 f"🎂 Уведомления о днях рождения: {'включены ✅' if new_val else 'выключены ❌'}",
                 keyboard=get_vk_notifications_keyboard(user)
@@ -997,15 +993,15 @@ def register_handlers(vk_labeler):
             child_idx = int(parts_data[1])
             child_name = parts_data[2] if len(parts_data) > 2 else "Ребёнок"
             child_group = parts_data[3] if len(parts_data) > 3 else ""
-            settings = await get_birthday_settings(
-                (await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)).id,
+            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
+            settings = await get_birthday_settings(user.id,
                 child_id
             )
             is_enabled = settings.get("enabled", False)
             if text in ("1", "🟢 Включить/выключить", "🔴 Включить/выключить"):
                 new_enabled = not is_enabled
                 await set_birthday_settings(
-                    user_id=(await get_user(peer_id=message.peer_id)).id,
+                    user_id=user.id,
                     child_id=child_id,
                     enabled=new_enabled,
                     mode=settings.get("mode", "tomorrow"),
@@ -1015,15 +1011,12 @@ def register_handlers(vk_labeler):
                 )
                 # Если включили — включаем глобально
                 if new_enabled:
-                    user = await get_user(peer_id=message.peer_id)
                     if not getattr(user, 'vk_birthday_enabled', False):
-                        await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
+                        user = await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
                 status = "✅ Включено" if new_enabled else "❌ Выключено"
                 await message.answer(f"{'✅ Уведомления включены!' if new_enabled else '❌ Уведомления выключены.'}")
                 # Показываем обновлённое меню ребёнка
-                updated = await get_birthday_settings(
-                    (await get_user(peer_id=message.peer_id)).id, child_id
-                )
+                updated = await get_birthday_settings(user.id, child_id)
                 is_e = updated.get("enabled", False)
                 mode = updated.get("mode", "tomorrow")
                 h = updated.get("notify_hour", 7)
@@ -1042,7 +1035,7 @@ def register_handlers(vk_labeler):
                 await message.answer("\n".join(lines), keyboard=get_vk_birthday_child_keyboard(is_e, mode_desc))
             elif text in ("2", "📅 Режим: завтра"):
                 await set_birthday_settings(
-                    user_id=(await get_user(peer_id=message.peer_id)).id,
+                    user_id=user.id,
                     child_id=child_id,
                     enabled=True,
                     mode="tomorrow",
@@ -1050,7 +1043,6 @@ def register_handlers(vk_labeler):
                     notify_hour=settings.get("notify_hour", 7),
                     notify_minute=settings.get("notify_minute", 0),
                 )
-                user = await get_user(peer_id=message.peer_id)
                 if not getattr(user, 'vk_birthday_enabled', False):
                     await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
                 await message.answer("✅ Режим установлен: уведомлять за день до ДР")
@@ -1078,7 +1070,6 @@ def register_handlers(vk_labeler):
                 await message.answer("\n".join(lines))
             elif text == "◀️ Назад к списку":
                 # Go back to birthday menu with child buttons
-                user = await get_user(peer_id=message.peer_id)
                 if not user or not user.login:
                     await clear_vk_fsm_state(message.peer_id)
                     await message.answer("❌ Ошибка. Попробуйте /set_login", keyboard=get_vk_settings_keyboard())
@@ -1158,7 +1149,7 @@ def register_handlers(vk_labeler):
                 notify_minute=settings.get("notify_minute", 0),
             )
             if not getattr(user, 'vk_birthday_enabled', False):
-                await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
+                user = await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
             wd_name = VK_BD_WEEKDAY_NAMES[weekday].split(" — ")[1]
             await message.answer(f"✅ День недели: {wd_name}\n\nТеперь введите час уведомления (6-21):")
             await save_vk_fsm_state(message.peer_id, "bd_set_hour",
