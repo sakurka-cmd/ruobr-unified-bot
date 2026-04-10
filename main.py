@@ -104,6 +104,18 @@ async def main() -> None:
     dp.include_router(schedule.router)
     dp.include_router(birthday.router)
 
+    # ===== Global unhandled TG error handler =====
+    @dp.errors()
+    async def error_handler(event):
+        logger.error(f"Unhandled TG handler error: {event.exception}", exc_info=event.exception)
+        try:
+            if event.update and event.update.event:
+                msg = event.update.event.message
+                if msg:
+                    await tg_bot.send_message(msg.chat.id, "⚠️ Внутренняя ошибка бота. Попробуйте позже.")
+        except Exception:
+            pass
+
     await tg_bot.delete_webhook(drop_pending_updates=True)
     logger.info("TG webhook deleted")
 
