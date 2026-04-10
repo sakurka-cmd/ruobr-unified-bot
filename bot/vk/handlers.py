@@ -185,9 +185,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="/start")
     async def vk_start(message: Message):
-        user = await get_user(peer_id=message.peer_id)
-        if not user:
-            user = await create_or_update_user(peer_id=message.peer_id)
+        user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
         is_auth = user and user.login
         text = ("👋 Школьный бот — ВК версия\n\n")
         if not is_auth:
@@ -227,9 +225,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="👤 Мой профиль")
     async def vk_profile(message: Message):
-        user = await get_user(peer_id=message.peer_id)
-        if not user:
-            user = await create_or_update_user(peer_id=message.peer_id)
+        user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
         if not user:
             await message.answer("❌ Ошибка создания профиля. Попробуйте /start")
             return
@@ -749,8 +745,8 @@ def register_handlers(vk_labeler):
 
         # Переключатели уведомлений (кнопки с динамическим текстом)
         if text.startswith("💰 Баланс:"):
-            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not user.vk_balance_enabled
+            user = await get_user(peer_id=message.peer_id)
+            new_val = not user.vk_balance_enabled if user else True
             user = await create_or_update_user(peer_id=message.peer_id, vk_balance_enabled=new_val)
             await message.answer(
                 f"💰 Уведомления о балансе: {'включены ✅' if new_val else 'выключены ❌'}",
@@ -759,8 +755,8 @@ def register_handlers(vk_labeler):
             return
 
         if text.startswith("⭐ Оценки:"):
-            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not user.vk_marks_enabled
+            user = await get_user(peer_id=message.peer_id)
+            new_val = not user.vk_marks_enabled if user else True
             user = await create_or_update_user(peer_id=message.peer_id, vk_marks_enabled=new_val)
             await message.answer(
                 f"⭐ Уведомления об оценках: {'включены ✅' if new_val else 'выключены ❌'}",
@@ -769,8 +765,8 @@ def register_handlers(vk_labeler):
             return
 
         if text.startswith("🍽 Питание:"):
-            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not user.vk_food_enabled
+            user = await get_user(peer_id=message.peer_id)
+            new_val = not user.vk_food_enabled if user else True
             user = await create_or_update_user(peer_id=message.peer_id, vk_food_enabled=new_val)
             await message.answer(
                 f"🍽 Уведомления о питании: {'включены ✅' if new_val else 'выключены ❌'}",
@@ -779,8 +775,8 @@ def register_handlers(vk_labeler):
             return
 
         if text.startswith("🎂 Дни рождения:"):
-            user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
-            new_val = not getattr(user, 'vk_birthday_enabled', False)
+            user = await get_user(peer_id=message.peer_id)
+            new_val = not getattr(user, 'vk_birthday_enabled', False) if user else True
             user = await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=new_val)
             await message.answer(
                 f"🎂 Уведомления о днях рождения: {'включены ✅' if new_val else 'выключены ❌'}",
@@ -1015,14 +1011,13 @@ def register_handlers(vk_labeler):
                         user = await create_or_update_user(peer_id=message.peer_id, vk_birthday_enabled=True)
                 status = "✅ Включено" if new_enabled else "❌ Выключено"
                 await message.answer(f"{'✅ Уведомления включены!' if new_enabled else '❌ Уведомления выключены.'}")
-                # Показываем обновлённое меню ребёнка
-                updated = await get_birthday_settings(user.id, child_id)
-                is_e = updated.get("enabled", False)
-                mode = updated.get("mode", "tomorrow")
-                h = updated.get("notify_hour", 7)
-                m = updated.get("notify_minute", 0)
+                # Показываем обновлённое меню ребёнка (значения известны после set)
+                is_e = new_enabled
+                mode = settings.get("mode", "tomorrow")
+                h = settings.get("notify_hour", 7)
+                m = settings.get("notify_minute", 0)
                 if mode == "weekly":
-                    wd = updated.get("notify_weekday", 1)
+                    wd = settings.get("notify_weekday", 1)
                     wd_name = VK_BD_WEEKDAY_NAMES[wd].split(" — ")[1] if 0 <= wd <= 6 else "?"
                     mode_desc = f"Еженедельно ({wd_name}, {h:02d}:{m:02d})"
                 else:
@@ -1290,12 +1285,7 @@ def register_handlers(vk_labeler):
                 names = "\n".join([f"  • {c.full_name} ({c.group})" for c in children])
                 await message.answer(f"✅ Авторизация успешна!\n\nДети:\n{names}")
 
-            # Проверяем, нет ли уже юзера с таким login → предложить привязку
-            existing = await get_user(peer_id=message.peer_id)
-            if existing and existing.login:
-                await create_or_update_user(peer_id=message.peer_id, login=payload, password=text)
-            else:
-                await create_or_update_user(peer_id=message.peer_id, login=payload, password=text)
+            await create_or_update_user(peer_id=message.peer_id, login=payload, password=text)
             await clear_vk_fsm_state(message.peer_id)
             await message.answer("🏠 Готово!", keyboard=get_vk_main_keyboard())
 
