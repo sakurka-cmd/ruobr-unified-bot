@@ -23,7 +23,6 @@ from ..database import (
     is_notification_sent,
     mark_notification_sent,
     cleanup_old_notifications,
-    get_users_with_birthday_notifications,
     get_birthday_settings,
     get_user_by_id,
     UserConfig,
@@ -624,13 +623,6 @@ class NotificationService:
                 if last_hour == current_hour:
                     continue
 
-                # Получаем настройки ДР для этого канала
-                bday_users = await get_users_with_birthday_notifications()
-                relevant = [b for b in bday_users if b["user_id"] == uid and b["channel"] == channel]
-                if not relevant:
-                    self._last_birthday_check_hour[bh_key] = current_hour
-                    continue
-
                 for child_idx, child in enumerate(children):
                     bd_cache_key = f"bd_settings:{uid}:{child.id}"
                     settings = birthday_settings_cache.get(bd_cache_key)
@@ -652,7 +644,7 @@ class NotificationService:
                     if mode == "tomorrow":
                         await self._process_tomorrow_mode(user, child, child_idx, now, tz, login, password, channel)
                     elif mode == "weekly":
-                        await self._process_weekly_mode(user, child, child_idx, now, tz, login, password, channel)
+                        await self._process_weekly_mode(user, child, child_idx, now, tz, login, password, channel, settings)
 
                 # Mark hour as checked only if we had relevant settings
                 # (avoid re-querying DB every 5 min for users without birthday config)
@@ -697,9 +689,10 @@ class NotificationService:
         await self._send_to_user(user, text, channel=channel)
         await mark_notification_sent(user_id=uid, notification_type="birthday", notification_key=notif_key, channel=channel)
 
-    async def _process_weekly_mode(self, user, child, child_idx, now, tz, login, password, channel):
-        from ..database import get_birthday_settings
-        notify_weekday = (await get_birthday_settings(user.id, child.id)).get("notify_weekday", 1)
+    async def _process_weekly_mode(self, user, child, child_idx, now, tz, login, password, channel, settings=None):
+        if settings is None:
+            settings = await get_birthday_settings(user.id, child.id)
+        notify_weekday = settings.get("notify_weekday", 1)
         if now.weekday() != notify_weekday:
             return
         week_start = now.date()
