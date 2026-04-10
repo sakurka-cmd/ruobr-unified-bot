@@ -1296,12 +1296,24 @@ async def run_vk_bot(vk_token: str):
     """Запуск VK бота (опционально)."""
     try:
         from vkbottle import Bot as VKBot, VKAPIError
+        from vkbottle.exception_factory.error_handler import ErrorHandler
 
-        vk_bot = VKBot(token=vk_token)
+        # Custom error handler with redirect_arguments to access message in handler
+        vk_err_handler = ErrorHandler(redirect_arguments=True)
+        vk_bot = VKBot(token=vk_token, error_handler=vk_err_handler)
         vk_labeler = vk_bot.labeler
         logger.info("VK Bot initialized")
 
         register_handlers(vk_labeler)
+
+        # Global unhandled VK error handler
+        @vk_err_handler.register_undefined_error_handler
+        async def vk_error_handler_fn(error, message):
+            logger.error(f"Unhandled VK handler error: {error}", exc_info=True)
+            try:
+                await message.answer("⚠️ Внутренняя ошибка бота. Попробуйте позже.")
+            except Exception:
+                pass
 
         logger.info("VK Bot handlers registered")
         return vk_bot
