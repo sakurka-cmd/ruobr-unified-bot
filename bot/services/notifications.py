@@ -465,6 +465,29 @@ class NotificationService:
                             "question_id": mark.get("question_id")
                         })
 
+            # Lazy baseline: if user has no mark history, mark all current marks
+            # as seen silently to prevent flood on first check after enabling notifications
+            if all_marks:
+                sample_key = f"{all_marks[0]['date']}|{all_marks[0]['subject']}|{all_marks[0]['question_id']}|{all_marks[0]['value']}"
+                channels_to_check = []
+                if user.chat_id and user.marks_enabled:
+                    channels_to_check.append("tg")
+                if user.peer_id and user.vk_marks_enabled:
+                    channels_to_check.append("vk")
+                if channels_to_check:
+                    has_any = any(
+                        await is_notification_sent(user_id=uid, notification_type="mark", notification_key=sample_key, channel=ch)
+                        for ch in channels_to_check
+                    )
+                    if not has_any:
+                        # No history found — this is a new user, mark ALL current marks as seen
+                        for m in all_marks:
+                            notif_key = f"{m['date']}|{m['subject']}|{m['question_id']}|{m['value']}"
+                            for ch in channels_to_check:
+                                await mark_notification_sent(user_id=uid, notification_type="mark", notification_key=notif_key, channel=ch)
+                        logger.info(f"Lazy marks baseline: {len(all_marks)} marks for user {uid}")
+                        return  # nothing to send — all existing marks are now "seen"
+
             new_marks = []
             seen = set()
             for m in all_marks:
