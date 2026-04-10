@@ -2,7 +2,6 @@
 Утилиты для форматирования вывода.
 """
 import re
-import re
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -165,7 +164,10 @@ def normalize_date_to_iso(date_str):
     Поддерживаемые входные форматы:
     - YYYY-MM-DD (уже ISO)
     - YYYY-MM-DDTHH:MM:SS или YYYY-MM-DD HH:MM:SS
-    - DD.MM.YYYY
+    - DD.MM.YYYY, DD.MM.YY
+    - DD/MM.YYYY, DD/MM/YYYY
+    - YYYY/MM/DD
+    - DD-MM-YY
 
     Args:
         date_str: Строка с датой в произвольном формате.
@@ -186,12 +188,15 @@ def normalize_date_to_iso(date_str):
     for sep in ["T", " "]:
         if sep in date_str:
             date_str = date_str.split(sep)[0]
-            return date_str
+            break
 
-    # DD.MM.YYYY
-    for fmt in ["%d.%m.%Y", "%d/%m.%Y", "%d/%m/%Y"]:
+    if len(date_str) == 10 and date_str[4] == "-" and date_str[7] == "-":
+        return date_str
+
+    # Форматы с разделителями
+    for fmt in ["%d.%m.%Y", "%d.%m.%y", "%d/%m.%Y", "%d/%m/%Y",
+                "%Y/%m/%d", "%d-%m-%Y"]:
         try:
-            from datetime import datetime
             dt = datetime.strptime(date_str, fmt)
             return dt.strftime("%Y-%m-%d")
         except ValueError:

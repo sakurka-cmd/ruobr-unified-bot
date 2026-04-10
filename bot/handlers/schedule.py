@@ -20,7 +20,7 @@ from ..services import (
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
     format_weekday, truncate_text, extract_homework_files, 
-    clean_html_text, has_meaningful_text
+    clean_html_text, has_meaningful_text, normalize_date_to_iso
 )
 from .balance import require_authentication
 
@@ -32,41 +32,6 @@ router = Router()
 NETWORK_TIMEOUT = 30
 
 
-def _normalize_hw_deadline(deadline_str: str) -> str:
-    """
-    Нормализация строки deadline в формат YYYY-MM-DD.
-    API может возвращать дедлайны в разных форматах:
-    - YYYY-MM-DD (основной)
-    - DD.MM.YYYY
-    - ISO datetime (YYYY-MM-DDTHH:MM:SS)
-    """
-    if not deadline_str:
-        return ""
-    
-    deadline_str = str(deadline_str).strip()
-    
-    # Уже YYYY-MM-DD (ровно 10 символов)
-    if len(deadline_str) == 10 and deadline_str[4] == '-' and deadline_str[7] == '-':
-        return deadline_str
-    
-    # ISO datetime — берём только дату
-    for sep in ['T', ' ']:
-        if sep in deadline_str:
-            deadline_str = deadline_str.split(sep)[0]
-            break
-    
-    if len(deadline_str) == 10 and deadline_str[4] == '-' and deadline_str[7] == '-':
-        return deadline_str
-    
-    # DD.MM.YYYY
-    for fmt in ["%d.%m.%Y", "%d/%m.%Y", "%d.%m.%y"]:
-        try:
-            dt = datetime.strptime(deadline_str, fmt)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    
-    return deadline_str
 
 
 async def safe_edit_message(status_msg: Message, text: str) -> bool:
@@ -268,7 +233,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                 # Фильтруем по дедлайну или по дате урока
                 relevant_hw = []
                 for hw in lesson.homework:
-                    hw_deadline = _normalize_hw_deadline(hw.get("deadline", ""))
+                    hw_deadline = normalize_date_to_iso(hw.get("deadline", ""))
                     if hw_deadline and hw_deadline == tomorrow_str:
                         # Есть явный дедлайн на завтра
                         relevant_hw.append(hw)
@@ -281,7 +246,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                     if lesson.homework and lesson.date == tomorrow_str:
                         for hw in lesson.homework:
                             raw_dl = hw.get("deadline", "")
-                            norm_dl = _normalize_hw_deadline(raw_dl)
+                            norm_dl = normalize_date_to_iso(raw_dl)
                             logger.info(
                                 f"HW filtered out: subject={lesson.subject}, "
                                 f"lesson_date={lesson.date}, tomorrow={tomorrow_str}, "

@@ -36,46 +36,13 @@ from . import (
     Child,
     FoodInfo
 )
-from ..utils.formatters import truncate_text, extract_dish_names, parse_complex_menu
+from ..utils.formatters import truncate_text, extract_dish_names, parse_complex_menu, normalize_date_to_iso
 
 logger = logging.getLogger(__name__)
 
 # Часовой пояс Новосибирск (GMT+7) — для расписания
 TZ = timezone(timedelta(hours=7))
 
-
-def normalize_date(date_str: str) -> str:
-    """
-    Нормализация строки даты в формат YYYY-MM-DD.
-    """
-    if not date_str:
-        return ""
-
-    date_str = str(date_str).strip()
-
-    if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
-        return date_str
-
-    if len(date_str) > 10:
-        for sep in ['T', ' ']:
-            if sep in date_str:
-                date_str = date_str.split(sep)[0]
-                break
-        if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
-            return date_str
-
-    formats = [
-        "%d.%m.%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y",
-    ]
-    for fmt in formats:
-        try:
-            dt = datetime.strptime(date_str, fmt)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-
-    logger.warning(f"Could not normalize date: '{date_str}'")
-    return date_str
 
 
 def extract_price(visit: Dict) -> float:
@@ -550,7 +517,7 @@ class NotificationService:
                     if not isinstance(visit, dict):
                         continue
                     raw_date = visit.get("date", "")
-                    visit_date = normalize_date(raw_date)
+                    visit_date = normalize_date_to_iso(raw_date)
                     if visit_date and visit_date != today_str:
                         continue
 
@@ -788,7 +755,7 @@ class NotificationService:
                     for visit in info.visits:
                         if not isinstance(visit, dict):
                             continue
-                        visit_date = normalize_date(visit.get("date", ""))
+                        visit_date = normalize_date_to_iso(visit.get("date", ""))
                         if visit_date != today_str:
                             continue
                         line = visit.get("line", visit.get("line_id", 0))

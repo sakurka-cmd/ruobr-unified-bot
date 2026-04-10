@@ -38,26 +38,6 @@ logger = logging.getLogger(__name__)
 
 # ===== VK Helpers =====
 
-def _vk_normalize_hw_deadline(deadline_str: str) -> str:
-    if not deadline_str:
-        return ""
-    deadline_str = str(deadline_str).strip()
-    if len(deadline_str) == 10 and deadline_str[4] == '-' and deadline_str[7] == '-':
-        return deadline_str
-    for sep in ['T', ' ']:
-        if sep in deadline_str:
-            deadline_str = deadline_str.split(sep)[0]
-            break
-    if len(deadline_str) == 10 and deadline_str[4] == '-' and deadline_str[7] == '-':
-        return deadline_str
-    for fmt in ["%d.%m.%Y", "%d/%m.%Y", "%d.%m.%y"]:
-        try:
-            dt = datetime.strptime(deadline_str, fmt)
-            return dt.strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return deadline_str
-
 
 async def _vk_show_classmates(message, login, password, child_idx, child):
     try:
@@ -473,7 +453,7 @@ def register_handlers(vk_labeler):
                 for lesson in lessons:
                     relevant_hw = []
                     for hw in lesson.homework:
-                        hw_deadline = _vk_normalize_hw_deadline(hw.get("deadline", ""))
+                        hw_deadline = normalize_date_to_iso(hw.get("deadline", ""))
                         if hw_deadline and hw_deadline == tomorrow_str:
                             relevant_hw.append(hw)
                         elif not hw_deadline and lesson.date == tomorrow_str:
