@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from ruobr_api import AsyncRuobr
@@ -701,6 +701,88 @@ class RuobrClient:
 
 
 from .cache import children_cache
+
+# Максимальный размер скачиваемого файла (10 МБ)
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+def _filename_from_url(url: str) -> str:
+    """Извлечение имени файла из URL."""
+    from urllib.parse import urlparse, unquote
+    path = urlparse(url).path
+    name = path.rsplit("/", 1)[-1] if "/" in path else path
+    name = unquote(name)
+    return name if name else "file"
+
+
+async def download_homework_file(
+    url: str,
+    login: str,
+    password: str,
+    timeout: float = 30.0,
+) -> Optional[Tuple[bytes, str]]:
+    """
+    Скачивание файла с сервера Ruobr с авторизацией.
+
+    Ruobr API использует кастомную авторизацию через HTTP-заголовки
+    username/password (не Basic Auth, а именно ключи «username» и «password»).
+
+    Args:
+        url: Полный URL файла (может начинаться с //).
+        login: Логин Ruobr.
+        password: Пароль Ruobr.
+        timeout: Таймаут скачивания в секундах.
+
+    Returns:
+        Кортеж (content_bytes, filename) при успехе, None при неудаче.
+    """
+    import os
+
+    if not url:
+        return None
+    if url.startswith("//"):
+        url = "https:" + url
+
+    filename = _filename_from_url(url)
+    auth_headers = {"username": login, "password": password}
+
+    # 1) Скачиваем БЕЗ авторизации (для публичных CDN / внешних ссылок)
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=True
+        ) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                content_type = resp.headers.get("content-type", "")
+                # Проверяем, что это не HTML-страница с ошибкой
+                if "text/html" not in content_type.lower():
+                    if len(resp.content) <= MAX_FILE_SIZE and len(resp.content) > 0:
+                        logger.info(f"Downloaded file (no-auth): {filename}, size={len(resp.content)}")
+                        return resp.content, filename
+    except Exception as e:
+        logger.debug(f"File download without auth failed: {e}")
+
+    # 2) Пробуем С авторизацией Ruobr (для файлов за авторизацией)
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=True
+        ) as client:
+            resp = await client.get(url, headers=auth_headers)
+            if resp.status_code == 200:
+                content_type = resp.headers.get("content-type", "")
+                if "text/html" not in content_type.lower():
+                    if len(resp.content) <= MAX_FILE_SIZE and len(resp.content) > 0:
+                        logger.info(f"Downloaded file (auth): {filename}, size={len(resp.content)}")
+                        return resp.content, filename
+            else:
+                logger.warning(
+                    f"File download with auth failed: status={resp.status_code}, url={url[:100]}"
+                )
+    except Exception as e:
+        logger.warning(f"File download with auth error: {e}")
+
+    logger.warning(f"Could not download file: {url[:100]}")
+    return None
 
 
 async def get_children_async(login: str, password: str, *, use_cache: bool = True) -> List[Child]:

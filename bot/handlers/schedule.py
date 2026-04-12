@@ -2,6 +2,7 @@
 Обработчики для расписания, ДЗ и оценок.
 """
 import asyncio
+import io
 import logging
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -15,7 +16,7 @@ from ..config import config
 from ..database import UserConfig
 from ..services import (
     Child, Lesson, get_children_async, get_timetable_for_children,
-    RuobrError, NetworkError, AuthenticationError
+    RuobrError, NetworkError, AuthenticationError, download_homework_file
 )
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
@@ -286,20 +287,53 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
             # Отправляем файлы отдельными сообщениями
             if all_files:
                 for file_type, file_url, subject in all_files:
-                    try:
-                        if file_type == 'img':
-                            await asyncio.wait_for(
-                                message.answer_photo(photo=file_url, caption=f"📎 {subject}"),
-                                timeout=NETWORK_TIMEOUT
-                            )
-                        else:
-                            await asyncio.wait_for(
-                                message.answer_document(document=file_url, caption=f"📎 {subject}"),
-                                timeout=NETWORK_TIMEOUT
-                            )
-                    except (TelegramAPIError, asyncio.TimeoutError) as e:
-                        logger.warning(f"Failed to send file {file_url}: {e}")
-                        # Если не удалось отправить файл - отправляем ссылку
+                    sent = False
+                    # 1) Скачиваем файл через авторизованную сессию Ruobr
+                    downloaded = await download_homework_file(file_url, login, password)
+                    if downloaded:
+                        file_bytes, filename = downloaded
+                        try:
+                            if file_type == 'img':
+                                await asyncio.wait_for(
+                                    message.answer_photo(
+                                        photo=io.BytesIO(file_bytes),
+                                        caption=f"📎 {subject}"
+                                    ),
+                                    timeout=NETWORK_TIMEOUT
+                                )
+                            else:
+                                await asyncio.wait_for(
+                                    message.answer_document(
+                                        document=io.BytesIO(file_bytes),
+                                        filename=filename,
+                                        caption=f"📎 {subject}"
+                                    ),
+                                    timeout=NETWORK_TIMEOUT
+                                )
+                            sent = True
+                            logger.info(f"Sent file attachment: {filename} ({len(file_bytes)} bytes)")
+                        except (TelegramAPIError, asyncio.TimeoutError) as e:
+                            logger.warning(f"Failed to send attachment {filename}: {e}")
+
+                    # 2) Fallback: передаём URL напрямую (Telegram скачает сам)
+                    if not sent:
+                        try:
+                            if file_type == 'img':
+                                await asyncio.wait_for(
+                                    message.answer_photo(photo=file_url, caption=f"📎 {subject}"),
+                                    timeout=NETWORK_TIMEOUT
+                                )
+                            else:
+                                await asyncio.wait_for(
+                                    message.answer_document(document=file_url, caption=f"📎 {subject}"),
+                                    timeout=NETWORK_TIMEOUT
+                                )
+                            sent = True
+                        except (TelegramAPIError, asyncio.TimeoutError) as e:
+                            logger.warning(f"Failed to send file by URL {file_url}: {e}")
+
+                    # 3) Последний fallback: отправляем ссылку текстом
+                    if not sent:
                         try:
                             await message.answer(f"📎 <a href=\"{file_url}\">Файл: {subject}</a>")
                         except Exception:

@@ -21,6 +21,7 @@ from .ruobr_client import (
     get_achievements_for_child,
     get_certificate_for_child,
     get_guide_for_child,
+    download_homework_file,
 )
 from .cache import (
     MemoryCache,
@@ -54,6 +55,7 @@ __all__ = [
     "get_achievements_for_child",
     "get_certificate_for_child",
     "get_guide_for_child",
+    "download_homework_file",
     "MemoryCache",
     "children_cache",
     "timetable_cache",

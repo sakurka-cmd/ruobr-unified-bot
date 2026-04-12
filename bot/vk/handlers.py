@@ -1,5 +1,6 @@
 """VK Bot message handlers and FSM logic."""
 import asyncio
+import io
 import json
 import logging
 from datetime import date, timedelta, datetime
@@ -19,7 +20,7 @@ from bot.credentials import safe_decrypt
 from bot.services import (
     get_children_async, get_food_for_children, get_timetable_for_children,
     AuthenticationError, get_classmates_for_child, get_achievements_for_child,
-    get_certificate_for_child, get_guide_for_child,
+    get_certificate_for_child, get_guide_for_child, download_homework_file,
 )
 from bot.utils.formatters import (
     format_balance, format_food_visit, format_date, format_lesson, format_mark, normalize_date_to_iso,
@@ -176,6 +177,82 @@ async def _vk_show_achievements(message, login, password, child_idx, child):
     except Exception as e:
         logger.error(f"VK handler error: {e}", exc_info=True)
         await message.answer("❌ Произошла ошибка. Попробуйте позже.")
+
+
+# ===== VK File Upload Helper =====
+
+async def _vk_send_homework_file(message, file_type: str, file_url: str, subject: str, login: str, password: str):
+    """
+    Отправка файла в VK-чат как документа.
+
+    Скачивает файл через авторизованную сессию Ruobr,
+    загружает в VK Docs и отправляет как вложение.
+    При любой ошибке отправляет ссылку текстом.
+    """
+    # 1) Скачиваем файл
+    downloaded = await download_homework_file(file_url, login, password)
+    if not downloaded:
+        # Fallback: отправляем ссылку
+        try:
+            await message.answer(f"📎 {subject}\n{file_url}")
+        except Exception:
+            pass
+        return
+
+    file_bytes, filename = downloaded
+
+    # 2) Загружаем в VK Docs через API
+    try:
+        api = message.ctx_api
+        peer_id = message.peer_id
+
+        # Получаем URL для загрузки документа
+        upload_info = await api.docs.get_messages_upload_server(
+            peer_id=peer_id,
+            type="doc",
+        )
+        upload_url = upload_info["upload_url"]
+
+        # Загружаем файл на VK-сервер
+        import httpx
+        async with httpx.AsyncClient(timeout=30) as client:
+            upload_resp = await client.post(
+                upload_url,
+                files={"file": (filename, io.BytesIO(file_bytes))},
+            )
+            upload_data = upload_resp.json()
+
+        if "error" in upload_data:
+            raise Exception(f"VK upload error: {upload_data.get('error')}")
+
+        # Сохраняем документ в VK
+        save_result = await api.docs.save(
+            file=upload_data["file"],
+            title=filename,
+        )
+
+        if not save_result:
+            raise Exception("VK docs.save returned empty result")
+
+        doc = save_result.get("doc", {})
+        owner_id = doc.get("owner_id", 0)
+        doc_id = doc.get("id", 0)
+
+        if not owner_id or not doc_id:
+            raise Exception(f"VK save result missing doc id: {save_result}")
+
+        # Отправляем документ как вложение
+        attachment = f"doc{owner_id}_{doc_id}"
+        await message.answer(f"📎 {subject}", attachment=attachment)
+        logger.info(f"VK: sent doc {filename} → {attachment}")
+
+    except Exception as e:
+        logger.warning(f"VK file upload failed ({filename}): {e}")
+        # Fallback: отправляем ссылку
+        try:
+            await message.answer(f"📎 {subject}\n{file_url}")
+        except Exception:
+            pass
 
 
 # ===== VK Handler Registration =====
@@ -443,6 +520,8 @@ def register_handlers(vk_labeler):
             timetable = await get_timetable_for_children(login, password, children, today, end)
             lines = [f"📘 Домашнее задание на завтра ({format_date(tomorrow_str)})"]
             found = False
+            # Собираем файлы для отправки
+            all_files = []  # [(file_type, url, subject)]
             for child in children:
                 lessons = timetable.get(child.id, [])
                 child_header_added = False
@@ -469,7 +548,16 @@ def register_handlers(vk_labeler):
                             if len(clean_text) > 500:
                                 clean_text = clean_text[:497] + "..."
                             lines.append(f"     📝 {clean_text}")
+                        # Извлекаем файлы из HTML
+                        files = extract_homework_files(hw_text)
+                        for file_type, file_url in files:
+                            all_files.append((file_type, file_url, lesson.subject))
             await message.answer(truncate_text("\n".join(lines)) if found else "ℹ️ На завтра домашнее задание не найдено.")
+
+            # Отправляем файлы как вложения
+            if all_files:
+                for file_type, file_url, subject in all_files:
+                    await _vk_send_homework_file(message, file_type, file_url, subject, login, password)
         except Exception as e:
             logger.error(f"VK handler error: {e}", exc_info=True)
             await message.answer("❌ Произошла ошибка. Попробуйте позже.")
