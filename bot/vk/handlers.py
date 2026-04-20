@@ -263,27 +263,22 @@ def register_handlers(vk_labeler):
     # ===== Deduplication: VK long polling sometimes sends same event twice =====
     _seen_msg_ids: set = set()
 
-    from vkbottle.dispatch.middlewares.abc import BaseMiddleware
-
-    class VKDedupMiddleware(BaseMiddleware):
-        """Skip duplicate VK messages (same message.id)."""
-
-        async def pre(self):
-            mid = self.event.id
-            if mid in _seen_msg_ids:
-                logger.debug(f"VK dedup: skipping duplicate message id={mid}")
-                self.stop("duplicate")
-                return
-            _seen_msg_ids.add(mid)
-            if len(_seen_msg_ids) > 500:
-                oldest = sorted(_seen_msg_ids)[:250]
-                for old in oldest:
-                    _seen_msg_ids.discard(old)
-
-    vk_labeler.message_view.register_middleware(VKDedupMiddleware)
+    async def _is_duplicate(message: Message) -> bool:
+        """Return True if this message was already processed."""
+        mid = message.id
+        if mid in _seen_msg_ids:
+            return True
+        _seen_msg_ids.add(mid)
+        if len(_seen_msg_ids) > 1000:
+            oldest = sorted(_seen_msg_ids)[:500]
+            for old in oldest:
+                _seen_msg_ids.discard(old)
+        return False
 
     @vk_labeler.message(text="/start")
     async def vk_start(message: Message):
+        if await _is_duplicate(message):
+            return
         user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
         is_auth = user and user.login
         text = ("👋 Школьный бот — ВК версия\n\n")
@@ -297,11 +292,13 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="/set_login")
     async def vk_set_login(message: Message):
+        if await _is_duplicate(message): return
         await save_vk_fsm_state(message.peer_id, "waiting_for_login")
         await message.answer("🔐 Введите логин от cabinet.ruobr.ru:")
 
     @vk_labeler.message(text="/link_tg")
     async def vk_link_tg(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.id:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -316,6 +313,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="/unlink_tg")
     async def vk_unlink_tg(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.id:
             return
@@ -324,6 +322,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="👤 Мой профиль")
     async def vk_profile(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
         if not user:
             await message.answer("❌ Ошибка создания профиля. Попробуйте /start")
@@ -354,19 +353,23 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="ℹ️ Информация")
     async def vk_info(message: Message):
+        if await _is_duplicate(message): return
         await message.answer("ℹ️ Информация\n\nВыберите что хотите узнать:", keyboard=get_vk_info_keyboard())
 
     @vk_labeler.message(text="⚙️ Настройки")
     async def vk_settings(message: Message):
+        if await _is_duplicate(message): return
         await message.answer("⚙️ Настройки", keyboard=get_vk_settings_keyboard())
 
     @vk_labeler.message(text="◀️ Назад")
     async def vk_back(message: Message):
+        if await _is_duplicate(message): return
         await clear_vk_fsm_state(message.peer_id)
         await message.answer("🏠 Главное меню", keyboard=get_vk_main_keyboard())
 
     @vk_labeler.message(text=["/balance", "💰 Баланс питания"])
     async def vk_balance(message: Message):
+        if await _is_duplicate(message): return
         peer_id = message.peer_id
         user = await get_user(peer_id=peer_id)
         if not user or not user.login:
@@ -408,6 +411,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="📅 Расписание сегодня")
     async def vk_ttoday(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -437,6 +441,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="📅 Расписание завтра")
     async def vk_ttomorrow(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -466,6 +471,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="🍽 Питание сегодня")
     async def vk_food(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -496,6 +502,7 @@ def register_handlers(vk_labeler):
     # ===== Оценки сегодня =====
     @vk_labeler.message(text="⭐ Оценки сегодня")
     async def vk_marks_today(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -534,6 +541,7 @@ def register_handlers(vk_labeler):
     # ===== ДЗ на завтра =====
     @vk_labeler.message(text="📘 ДЗ на завтра")
     async def vk_hw_tomorrow(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -597,6 +605,7 @@ def register_handlers(vk_labeler):
     # ===== Информация: Одноклассники =====
     @vk_labeler.message(text="👥 Одноклассники")
     async def vk_classmates(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -626,6 +635,7 @@ def register_handlers(vk_labeler):
     # ===== Информация: Учителя =====
     @vk_labeler.message(text="👩\u200d🏫 Учителя")
     async def vk_teachers(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -655,6 +665,7 @@ def register_handlers(vk_labeler):
     # ===== Информация: Доп. образование =====
     @vk_labeler.message(text="🎓 Доп. образование")
     async def vk_achievements(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -684,6 +695,7 @@ def register_handlers(vk_labeler):
     # ===== Справка =====
     @vk_labeler.message(text="📋 Справка")
     async def vk_help(message: Message):
+        if await _is_duplicate(message): return
         help_text = (
             "📋 Справка по боту\n\n"
             "Школьный бот — помогает родителям следить за учёбой детей.\n\n"
@@ -718,6 +730,7 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="🔔 Уведомления")
     async def vk_notifications(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
         await message.answer(
             "🔔 Настройки уведомлений\n\nНажмите для переключения:",
@@ -726,11 +739,13 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="🔑 Изменить логин/пароль")
     async def vk_change_login(message: Message):
+        if await _is_duplicate(message): return
         await save_vk_fsm_state(message.peer_id, "waiting_for_login")
         await message.answer("🔐 Введите логин от cabinet.ruobr.ru:\n\n❌ Отмена — для выхода")
 
     @vk_labeler.message(text="💰 Порог баланса")
     async def vk_threshold(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -771,6 +786,7 @@ def register_handlers(vk_labeler):
     # ===== Дни рождения (FSM) =====
     @vk_labeler.message(text="🎂 Дни рождения")
     async def vk_birthday(message: Message):
+        if await _is_duplicate(message): return
         user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
         if not user or not user.login:
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
@@ -829,6 +845,7 @@ def register_handlers(vk_labeler):
     # FSM: ввод кода привязки от TG
     @vk_labeler.message(text="/enter_code")
     async def vk_enter_link_code_start(message: Message):
+        if await _is_duplicate(message): return
         await save_vk_fsm_state(message.peer_id, "waiting_for_link_code")
         await message.answer(
             "📲 Ввод кода привязки от Telegram\n\n"
@@ -839,6 +856,7 @@ def register_handlers(vk_labeler):
     # FSM: ввод логина/пароля / авто-приём кода привязки
     @vk_labeler.message()
     async def vk_handle_all(message: Message):
+        if await _is_duplicate(message): return
         text = (message.text or "").strip()
         if not text:
             return
