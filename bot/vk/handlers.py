@@ -345,14 +345,21 @@ def register_handlers(vk_labeler):
 
     @vk_labeler.message(text="/balance")
     async def vk_balance(message: Message):
-        user = await get_user(peer_id=message.peer_id)
+        peer_id = message.peer_id
+        user = await get_user(peer_id=peer_id)
         if not user or not user.login:
+            logger.warning(f"VK /balance: user not found for peer_id={peer_id} (user={user}, login={user.login if user else None})")
             await message.answer("❌ Сначала настройте логин/пароль: /set_login")
             return
         login, password = safe_decrypt(user)
+        if not login:
+            logger.error(f"VK /balance: safe_decrypt failed for user id={user.id}")
+            await message.answer("❌ Ошибка расшифровки пароля. Перенастройте: /set_login")
+            return
         try:
             children = await get_children_async(login, password)
-        except Exception:
+        except Exception as e:
+            logger.error(f"VK /balance: get_children_async failed: {e}", exc_info=True)
             await message.answer("❌ Ошибка авторизации.")
             return
         if not children:
@@ -361,6 +368,7 @@ def register_handlers(vk_labeler):
         try:
             food_info = await get_food_for_children(login, password, children)
             thresholds = await get_all_thresholds_for_chat(user_id=user.id)
+            logger.info(f"VK /balance: got food_info for {len(children)} children, food_info keys={list(food_info.keys())}")
             lines = ["💰 Баланс питания\n"]
             for idx, child in enumerate(children, 1):
                 info = food_info.get(child.id)
@@ -368,10 +376,12 @@ def register_handlers(vk_labeler):
                 if info and info.has_food:
                     lines.append(f"{idx}. {format_balance(child, info.balance, threshold)}")
                 else:
+                    has_info = "no" if info is None else f"has_food={info.has_food}, balance={info.balance}"
+                    logger.info(f"VK /balance: child {child.id} ({child.full_name}) — {has_info}")
                     lines.append(f"{idx}. {child.full_name} ({child.group}): питание недоступно")
             await message.answer("\n".join(lines))
         except Exception as e:
-            logger.error(f"VK handler error: {e}", exc_info=True)
+            logger.error(f"VK /balance error: {e}", exc_info=True)
             await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
     @vk_labeler.message(text="📅 Расписание сегодня")

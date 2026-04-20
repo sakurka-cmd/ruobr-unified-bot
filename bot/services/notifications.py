@@ -5,6 +5,7 @@
 Отправляет в TG и/или VK согласно индивидуальным настройкам канала.
 """
 import asyncio
+import os
 import random
 import re
 import time
@@ -87,8 +88,6 @@ class NotificationService:
     MARKS_CHECK_DAYS = 14
     MARKS_CHECK_INTERVAL_SCHOOL = 900    # 15 min — во время уроков
     MARKS_CHECK_INTERVAL_SLOW = 3600     # 60 min — вне уроков
-    FOOD_CHECK_INTERVAL_FAST = 1800      # 30 min — 11:00–19:59
-    FOOD_CHECK_INTERVAL_SLOW = 3600      # 60 min — 20:00–23:59
     _JITTER_RANGE = 300  # +-5 min per-user stagger
 
     def __init__(self, bot: Bot, vk_api=None):
@@ -270,10 +269,12 @@ class NotificationService:
 
     @staticmethod
     def _get_food_interval(hour: int) -> Optional[int]:
+        fast = int(os.getenv("FOOD_CHECK_INTERVAL_FAST", "7200"))  # default 2h
+        slow = int(os.getenv("FOOD_CHECK_INTERVAL_SLOW", "14400"))  # default 4h
         if 11 <= hour <= 19:
-            return 1800
+            return fast
         elif 20 <= hour <= 23:
-            return 3600
+            return slow
         return None
 
     # ===== Обработка группы пользователей =====

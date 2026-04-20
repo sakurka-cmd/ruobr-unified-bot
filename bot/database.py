@@ -253,6 +253,36 @@ class DatabasePool:
             except Exception as e:
                 logger.warning(f"Default notification_settings check: {e}")
 
+            # ===== HEALING: починка peer_id для VK-only пользователей =====
+            # После миграции old-schema у VK-only пользователей chat_id = id (peer_id),
+            # но peer_id = NULL. Нормальный TG-пользователь никогда не имеет chat_id = id.
+            # Переносим: peer_id = chat_id, chat_id = NULL.
+            try:
+                async with conn.execute("""
+                    SELECT id, chat_id FROM users
+                    WHERE peer_id IS NULL AND chat_id IS NOT NULL AND chat_id = id
+                """) as cur:
+                    broken = await cur.fetchall()
+                for row in broken:
+                    uid = row["id"]
+                    await conn.execute(
+                        "UPDATE users SET peer_id = chat_id, chat_id = NULL WHERE id = ?",
+                        (uid,)
+                    )
+                if broken:
+                    await conn.commit()
+                    # Создаём VK notification_settings для починенных пользователей
+                    for row in broken:
+                        uid = row["id"]
+                        await conn.execute(
+                            "INSERT OR IGNORE INTO notification_settings (user_id, channel, balance_enabled, marks_enabled, food_enabled, birthday_enabled) VALUES (?, 'vk', 0, 1, 1, 0)",
+                            (uid,)
+                        )
+                    await conn.commit()
+                    logger.info(f"Healing: moved chat_id->peer_id for {len(broken)} VK-only user(s)")
+            except Exception as e:
+                logger.warning(f"peer_id healing check: {e}")
+
     async def _migrate_from_old_schema(self, conn: Connection) -> None:
         """Миграция со старой схемы (chat_id PK) на новую (id PK + notification_settings)."""
         logger.info("Starting migration from old schema...")
@@ -335,11 +365,34 @@ class DatabasePool:
             );
         """)
 
-        # 2. Копируем данные: users (old chat_id → new id + chat_id)
-        await conn.execute("""
-            INSERT INTO users_new (id, chat_id, login, password_encrypted, created_at, updated_at)
-            SELECT chat_id, chat_id, login, password_encrypted, created_at, updated_at FROM users
-        """)
+        # 2. Копируем данные: users (old chat_id → new id + chat_id + peer_id)
+        # В старом VK-only боте chat_id содержал VK peer_id.
+        # В новой схеме: peer_id = chat_id (VK peer_id), chat_id = NULL.
+        # Если в старой схеме были enabled/marks_enabled/food_enabled колонки —
+        # значит это была unified-версия с TG, тогда chat_id — настоящий TG chat_id.
+        has_enabled_col = False
+        try:
+            async with conn.execute("PRAGMA table_info(users)") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
+                has_enabled_col = "enabled" in cols
+        except Exception:
+            pass
+
+        if has_enabled_col:
+            # Unified-версия: chat_id = TG chat_id, но нет peer_id.
+            # Не трогаем chat_id, peer_id остаётся NULL — VK-пользователь
+            # должен быть привязан через /link_vk или повторный /set_login.
+            await conn.execute("""
+                INSERT INTO users_new (id, chat_id, login, password_encrypted, created_at, updated_at)
+                SELECT chat_id, chat_id, login, password_encrypted, created_at, updated_at FROM users
+            """)
+        else:
+            # VK-only версия: chat_id = VK peer_id.
+            # Устанавливаем peer_id = chat_id, chat_id = NULL.
+            await conn.execute("""
+                INSERT INTO users_new (id, chat_id, peer_id, login, password_encrypted, created_at, updated_at)
+                SELECT chat_id, NULL, chat_id, login, password_encrypted, created_at, updated_at FROM users
+            """)
 
         # 3. Копируем notification_settings из старых полей users.enabled/marks_enabled/...
         # Проверяем наличие колонок
