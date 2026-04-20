@@ -57,16 +57,16 @@ def create_proxied_session(proxy_url: str):
     from aiohttp_socks import ProxyConnector
     from aiogram.client.session.aiohttp import AiohttpSession
 
+    connector = ProxyConnector.from_url(proxy_url)
+
     class ProxiedSession(AiohttpSession):
-        def __init__(self, proxy_url: str):
-            super().__init__()
-            self._proxy_url = proxy_url
+        def __init__(self):
+            super().__init__(connector=connector)
 
         def _create_session(self) -> aiohttp.ClientSession:
-            connector = ProxyConnector.from_url(self._proxy_url)
-            return aiohttp.ClientSession(connector=connector)
+            return aiohttp.ClientSession(connector=self._connector, trust_env=True)
 
-    return ProxiedSession(proxy_url)
+    return ProxiedSession()
 
 
 def setup_logging() -> None:
@@ -131,17 +131,12 @@ async def main() -> None:
         except Exception:
             pass
 
-    # ===== Test TG connectivity through proxy =====
+    # ===== Test TG connectivity =====
     try:
-        import aiohttp
-        from aiohttp_socks import ProxyConnector
-        connector = ProxyConnector.from_url(proxy_url) if proxy_url else None
-        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15)) as test_session:
-            async with test_session.get("https://api.telegram.org") as resp:
-                logger.info(f"TG connectivity test: status={resp.status}")
-        logger.info("TG webhook deleted")
+        me = await asyncio.wait_for(tg_bot.get_me(), timeout=15)
+        logger.info(f"TG bot connected: @{me.username} (id={me.id})")
     except Exception as e:
-        logger.warning(f"TG connectivity test failed: {e}")
+        logger.error(f"TG bot connection failed: {type(e).__name__}: {e}")
 
     try:
         await asyncio.wait_for(
@@ -150,7 +145,7 @@ async def main() -> None:
         )
         logger.info("TG webhook deleted")
     except Exception as e:
-        logger.warning(f"TG webhook deletion failed (TG may be unreachable): {e}")
+        logger.warning(f"TG webhook deletion failed: {type(e).__name__}: {e}")
 
     # ===== VK Bot (optional) =====
     vk_bot_instance = None
