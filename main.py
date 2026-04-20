@@ -131,10 +131,22 @@ async def main() -> None:
         except Exception:
             pass
 
+    # ===== Test TG connectivity through proxy =====
+    try:
+        import aiohttp
+        from aiohttp_socks import ProxyConnector
+        connector = ProxyConnector.from_url(proxy_url) if proxy_url else None
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15)) as test_session:
+            async with test_session.get("https://api.telegram.org") as resp:
+                logger.info(f"TG connectivity test: status={resp.status}")
+        logger.info("TG webhook deleted")
+    except Exception as e:
+        logger.warning(f"TG connectivity test failed: {e}")
+
     try:
         await asyncio.wait_for(
             tg_bot.delete_webhook(drop_pending_updates=True),
-            timeout=10
+            timeout=30
         )
         logger.info("TG webhook deleted")
     except Exception as e:
