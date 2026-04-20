@@ -263,20 +263,24 @@ def register_handlers(vk_labeler):
     # ===== Deduplication: VK long polling sometimes sends same event twice =====
     _seen_msg_ids: set = set()
 
-    @vk_labeler.middleware()
-    async def vk_dedup_middleware(message, handler):
-        mid = message.id
-        if mid in _seen_msg_ids:
-            logger.debug(f"VK dedup: skipping duplicate message id={mid}")
-            return
-        _seen_msg_ids.add(mid)
-        # Keep set bounded (VK message IDs are int64, monotonic)
-        if len(_seen_msg_ids) > 500:
-            # Remove oldest 250 entries (smallest IDs)
-            oldest = sorted(_seen_msg_ids)[:250]
-            for old in oldest:
-                _seen_msg_ids.discard(old)
-        return await handler(message)
+    from vkbottle.dispatch.middlewares.abc import BaseMiddleware
+
+    class VKDedupMiddleware(BaseMiddleware):
+        """Skip duplicate VK messages (same message.id)."""
+
+        async def pre(self):
+            mid = self.event.id
+            if mid in _seen_msg_ids:
+                logger.debug(f"VK dedup: skipping duplicate message id={mid}")
+                self.stop("duplicate")
+                return
+            _seen_msg_ids.add(mid)
+            if len(_seen_msg_ids) > 500:
+                oldest = sorted(_seen_msg_ids)[:250]
+                for old in oldest:
+                    _seen_msg_ids.discard(old)
+
+    vk_labeler.message_view.register_middleware(VKDedupMiddleware)
 
     @vk_labeler.message(text="/start")
     async def vk_start(message: Message):
