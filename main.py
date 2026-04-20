@@ -116,8 +116,14 @@ async def main() -> None:
         except Exception:
             pass
 
-    await tg_bot.delete_webhook(drop_pending_updates=True)
-    logger.info("TG webhook deleted")
+    try:
+        await asyncio.wait_for(
+            tg_bot.delete_webhook(drop_pending_updates=True),
+            timeout=10
+        )
+        logger.info("TG webhook deleted")
+    except Exception as e:
+        logger.warning(f"TG webhook deletion failed (TG may be unreachable): {e}")
 
     # ===== VK Bot (optional) =====
     vk_bot_instance = None
