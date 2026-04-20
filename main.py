@@ -52,19 +52,20 @@ from bot.services.cache import periodic_cache_cleanup
 
 
 def create_proxied_session(proxy_url: str):
-    """Создает сессию с прокси для aiogram 3.x"""
-    import aiohttp
+    """Создает сессию с SOCKS5 прокси для aiogram 3.x."""
     from aiohttp_socks import ProxyConnector
     from aiogram.client.session.aiohttp import AiohttpSession
 
-    connector = ProxyConnector.from_url(proxy_url)
+    # aiogram 3.15+ поддерживает proxy напрямую
+    try:
+        return AiohttpSession(proxy=proxy_url)
+    except TypeError:
+        pass  # Старая версия aiogram — используем _build_connector
 
+    # aiogram 3.4 — 3.14: переопределяем _build_connector
     class ProxiedSession(AiohttpSession):
-        def __init__(self):
-            super().__init__(connector=connector)
-
-        def _create_session(self) -> aiohttp.ClientSession:
-            return aiohttp.ClientSession(connector=self._connector, trust_env=True)
+        def _build_connector(self):
+            return ProxyConnector.from_url(proxy_url)
 
     return ProxiedSession()
 
