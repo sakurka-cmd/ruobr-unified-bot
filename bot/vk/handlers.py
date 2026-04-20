@@ -260,6 +260,24 @@ async def _vk_send_homework_file(message, file_type: str, file_url: str, subject
 def register_handlers(vk_labeler):
     """Register all VK message handlers on the given labeler."""
 
+    # ===== Deduplication: VK long polling sometimes sends same event twice =====
+    _seen_msg_ids: set = set()
+
+    @vk_labeler.middleware()
+    async def vk_dedup_middleware(message, handler):
+        mid = message.id
+        if mid in _seen_msg_ids:
+            logger.debug(f"VK dedup: skipping duplicate message id={mid}")
+            return
+        _seen_msg_ids.add(mid)
+        # Keep set bounded (VK message IDs are int64, monotonic)
+        if len(_seen_msg_ids) > 500:
+            # Remove oldest 250 entries (smallest IDs)
+            oldest = sorted(_seen_msg_ids)[:250]
+            for old in oldest:
+                _seen_msg_ids.discard(old)
+        return await handler(message)
+
     @vk_labeler.message(text="/start")
     async def vk_start(message: Message):
         user = await get_user(peer_id=message.peer_id) or await create_or_update_user(peer_id=message.peer_id)
@@ -343,7 +361,7 @@ def register_handlers(vk_labeler):
         await clear_vk_fsm_state(message.peer_id)
         await message.answer("🏠 Главное меню", keyboard=get_vk_main_keyboard())
 
-    @vk_labeler.message(text="/balance")
+    @vk_labeler.message(text=["/balance", "💰 Баланс питания"])
     async def vk_balance(message: Message):
         peer_id = message.peer_id
         user = await get_user(peer_id=peer_id)
