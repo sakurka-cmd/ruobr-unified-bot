@@ -1374,9 +1374,10 @@ def register_handlers(vk_labeler):
                 await clear_vk_fsm_state(message.peer_id)
                 await message.answer("❌ Неверный логин или пароль. Попробуйте: /set_login")
                 return
-            except Exception:
+            except Exception as e:
+                logger.error(f"VK set_login: connection/auth error for login={payload}: {e}", exc_info=True)
                 await clear_vk_fsm_state(message.peer_id)
-                await message.answer("❌ Ошибка соединения.")
+                await message.answer("❌ Ошибка соединения с cabinet.ruobr.ru. Попробуйте позже.")
                 return
 
             if not children:
