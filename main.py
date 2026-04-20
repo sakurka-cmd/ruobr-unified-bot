@@ -11,20 +11,19 @@ import sys
 from pathlib import Path
 
 # ===== QRATOR User-Agent patch =====
-# ruobr_api использует httpx для запросов к api3d.ruobr.ru.
+# ruobr_api использует httpx.AsyncClient для запросов к api3d.ruobr.ru.
 # QRATOR (DDoS-защита ruobr.ru) блокирует запросы с дефолтным
-# User-Agent вроде "python-httpx/0.28".
-# Подменяем на браузерный, чтобы пройти защиту.
-import httpx as _httpx
+# User-Agent "python-httpx/x.y.z" → 403 Forbidden.
+# Патчим константу USER_AGENT до импорта ruobr_api.
+import httpx._client as _httpx_client
 try:
-    _orig_defaults = dict(_httpx._client.DEFAULT_HEADERS)
-    _httpx._client.DEFAULT_HEADERS["user-agent"] = (
+    _httpx_client.USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     )
 except Exception:
-    pass  # non-critical, ruobr_api will still work if QRATOR doesn't block
+    pass  # non-critical
 
 import aiohttp
 from aiogram import Bot, Dispatcher
