@@ -976,7 +976,7 @@ def register_handlers(vk_labeler):
                 return
             user = await get_user(peer_id=message.peer_id)
             uid = user.id if user and user.id else message.peer_id
-            await db_set_threshold(uid, child_id, value)
+            await db_set_threshold(user_id=uid, child_id=child_id, threshold=value)
             await clear_vk_fsm_state(message.peer_id)
             await message.answer(
                 f"✅ Порог установлен!\n\n"

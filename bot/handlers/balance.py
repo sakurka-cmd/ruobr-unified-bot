@@ -315,7 +315,7 @@ async def cb_threshold_child(callback: CallbackQuery, state: FSMContext):
     await state.update_data(selected_child_id=child_id, selected_child_index=child_index)
     await state.set_state(ThresholdStates.waiting_for_threshold_value)
 
-    current_threshold = await get_child_threshold(callback.message.chat.id, child_id)
+    current_threshold = await get_child_threshold(callback.message.chat.id, child_id=child_id)
 
     await callback.message.answer(
         f"\U0001f476 Выбран ребёнок.\n"
@@ -359,7 +359,7 @@ async def process_threshold_value(message: Message, state: FSMContext):
         await message.answer("\u274c Порог слишком большой (максимум 10 000 \u20bd).")
         return
 
-    await set_child_threshold(message.chat.id, child_id, value)
+    await set_child_threshold(message.chat.id, child_id=child_id, threshold=value)
 
     from ..services.cache import threshold_cache
     threshold_cache.delete(f"{message.chat.id}:thresholds")
