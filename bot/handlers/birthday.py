@@ -283,7 +283,7 @@ async def cb_toggle_child_enable(callback: CallbackQuery, user_config: Optional[
         notify_hour=settings.get("notify_hour", 7),
         notify_minute=settings.get("notify_minute", 0),
     )
-    await invalidate_birthday_cache(callback.message.chat.id, child_id)
+    invalidate_birthday_cache(callback.message.chat.id, child_id)
 
     # Если включили и глобально выключено — включаем глобально
     if new_enabled and not user_config.birthday_enabled:
@@ -330,7 +330,7 @@ async def cb_mode_tomorrow(callback: CallbackQuery, user_config: Optional[UserCo
         notify_hour=settings.get("notify_hour", 7),
         notify_minute=settings.get("notify_minute", 0),
     )
-    await invalidate_birthday_cache(callback.message.chat.id, child_id)
+    invalidate_birthday_cache(callback.message.chat.id, child_id)
 
     # Показываем выбор часа
     await _show_hour_selection(
@@ -364,7 +364,7 @@ async def cb_mode_weekly(callback: CallbackQuery, user_config: Optional[UserConf
         notify_hour=settings.get("notify_hour", 7),
         notify_minute=settings.get("notify_minute", 0),
     )
-    await invalidate_birthday_cache(callback.message.chat.id, child_id)
+    invalidate_birthday_cache(callback.message.chat.id, child_id)
 
     # Показываем выбор дня недели
     await _show_weekday_selection(
@@ -397,7 +397,7 @@ async def cb_set_weekday(callback: CallbackQuery):
         notify_hour=settings.get("notify_hour", 7),
         notify_minute=settings.get("notify_minute", 0),
     )
-    await invalidate_birthday_cache(callback.message.chat.id, child_id)
+    invalidate_birthday_cache(callback.message.chat.id, child_id)
 
     # Показываем выбор часа
     await _show_hour_selection(
@@ -431,7 +431,7 @@ async def cb_set_hour(callback: CallbackQuery):
         notify_hour=hour,
         notify_minute=settings.get("notify_minute", 0),
     )
-    await invalidate_birthday_cache(callback.message.chat.id, child_id)
+    invalidate_birthday_cache(callback.message.chat.id, child_id)
 
     # Показываем выбор минут
     await _show_minute_selection(
@@ -467,7 +467,7 @@ async def cb_set_minute(callback: CallbackQuery, state: FSMContext):
         notify_hour=hour,
         notify_minute=minute,
     )
-    await invalidate_birthday_cache(callback.message.chat.id, child_id)
+    invalidate_birthday_cache(callback.message.chat.id, child_id)
 
     time_str = _format_time_str(hour, minute)
     mode = settings.get("mode", "tomorrow")
