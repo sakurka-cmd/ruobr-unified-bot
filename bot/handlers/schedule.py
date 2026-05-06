@@ -2,7 +2,6 @@
 Обработчики для расписания, ДЗ и оценок.
 """
 import asyncio
-import io
 import logging
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -17,7 +16,6 @@ from ..database import UserConfig
 from ..services import (
     Child, Lesson, get_children_async, get_timetable_for_children,
     RuobrError, NetworkError, AuthenticationError, download_homework_file,
-    fetch_homework_detail,
 )
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
@@ -207,20 +205,6 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
             timeout=NETWORK_TIMEOUT
         )
         
-        # DEBUG: логируем все уроки с ДЗ (INFO for troubleshooting)
-        logger.info(f"HW check: tomorrow={tomorrow_str}, children={len(children)}")
-        for child in children:
-            lessons = timetable.get(child.id, [])
-            for lesson in lessons:
-                if lesson.homework:
-                    logger.info(
-                        f"HW lesson: child={child.id} date={lesson.date} "
-                        f"subject={lesson.subject} hw_count={len(lesson.homework)}"
-                    )
-                    for idx, hw in enumerate(lesson.homework):
-                        import json
-                        logger.info(f"  HW item [{idx}] FULL DUMP: {json.dumps(hw, ensure_ascii=False, default=str)[:2000]}")
-        
         lines = [f"📘 <b>Домашнее задание на завтра</b> ({format_date(tomorrow_str)})"]
         found = False
         
@@ -276,8 +260,6 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                     
                     # Собираем файлы для отправки
                     files = extract_homework_files(hw_text)
-                    if files:
-                        logger.info(f"EXTRACTED {len(files)} files from text for {lesson.subject} hw_id={hw.get('id')}: {files}")
                     for file_type, file_url in files:
                         all_files.append((file_type, file_url, lesson.subject))
 
@@ -321,14 +303,11 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
             await safe_edit_message(status_msg, text)
             
             # Отправляем файлы отдельными сообщениями
-            logger.info(f"FILE SEND: total {len(all_files)} files to send")
             if all_files:
-                for idx, (file_type, file_url, subject) in enumerate(all_files):
-                    logger.info(f"FILE SEND [{idx}]: type={file_type} url={file_url[:120]} subject={subject}")
+                for file_type, file_url, subject in all_files:
                     sent = False
                     # 1) Скачиваем файл через авторизованную сессию Ruobr
                     downloaded = await download_homework_file(file_url, login, password)
-                    logger.info(f"FILE SEND [{idx}]: download result={'OK '+str(len(downloaded[0]))+' bytes' if downloaded else 'FAILED'}")
                     if downloaded:
                         file_bytes, filename = downloaded
                         try:

@@ -819,21 +819,21 @@ async def fetch_homework_detail(
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                 resp = await client.get(url, headers=auth_headers)
-                logger.info(f"HW detail API [{url.split('ruobr.ru')[1]}]: status={resp.status_code} content_type={resp.headers.get('content-type','')[:50]}")
+                logger.debug(f"HW detail API [{url.split('ruobr.ru')[1]}]: status={resp.status_code} content_type={resp.headers.get('content-type','')[:50]}")
                 if resp.status_code == 200:
                     try:
                         data = resp.json()
-                        logger.info(f"HW detail response keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
-                        logger.info(f"HW detail FULL: {json.dumps(data, ensure_ascii=False, default=str)[:3000]}")
+                        logger.debug(f"HW detail response keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+                        logger.debug(f"HW detail FULL: {json.dumps(data, ensure_ascii=False, default=str)[:3000]}")
                         return data if isinstance(data, dict) else {}
                     except Exception:
                         # Не JSON — возможно HTML страница
                         text_preview = resp.text[:200]
-                        logger.info(f"HW detail non-JSON response: {text_preview}")
+                        logger.debug(f"HW detail non-JSON response: {text_preview}")
         except Exception as e:
-            logger.info(f"HW detail API error for {url.split('ruobr.ru')[1]}: {e}")
+            logger.debug(f"HW detail API error for {url.split('ruobr.ru')[1]}: {e}")
 
-    logger.info("HW detail: all endpoints failed")
+    logger.debug("HW detail: all endpoints failed")
     return None
 
 
