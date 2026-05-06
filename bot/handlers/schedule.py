@@ -296,14 +296,6 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                                 # Попробуем как относительный путь к медиа
                                 all_files.append(("doc", f"https://ruobr.ru/media/{doc_str}", lesson.subject))
 
-                # Пробуем получить детали ДЗ через отдельный API (для первого задания)
-                if not hasattr(cmd_hw, '_detail_fetched'):
-                    cmd_hw._detail_fetched = True
-                    hw_id = hw.get("id")
-                    hw_type = hw.get("type", "group")
-                    if hw_id:
-                        detail = await fetch_homework_detail(hw_id, child.id, hw_type, login, password)
-
                 # Обработка docs_for_lesson (новое поле — вложения на уровне урока)
                 if lesson.docs_for_lesson:
                     logger.info(f"docs_for_lesson for {lesson.subject}: count={len(lesson.docs_for_lesson)}")
