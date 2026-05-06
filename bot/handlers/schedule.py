@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 
 from ..config import config
@@ -335,7 +335,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                             if file_type == 'img':
                                 await asyncio.wait_for(
                                     message.answer_photo(
-                                        photo=io.BytesIO(file_bytes),
+                                        photo=BufferedInputFile(file_bytes, filename=filename or "image.png"),
                                         caption=f"📎 {subject}"
                                     ),
                                     timeout=NETWORK_TIMEOUT
@@ -343,7 +343,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                             else:
                                 await asyncio.wait_for(
                                     message.answer_document(
-                                        document=io.BytesIO(file_bytes),
+                                        document=BufferedInputFile(file_bytes, filename=filename),
                                         filename=filename,
                                         caption=f"📎 {subject}"
                                     ),
