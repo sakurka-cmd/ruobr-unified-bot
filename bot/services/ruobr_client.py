@@ -632,17 +632,7 @@ class RuobrClient:
             logger.warning(f"Unexpected timetable response type: {type(result)}")
             return []
 
-        # DEBUG: dump full raw lesson dict for lessons with homework
-        if result and isinstance(result, list):
-            from datetime import date as _date
-            _tomorrow = _date.today().strftime("%Y-%m-%d")
-            for lesson in result:
-                if isinstance(lesson, dict):
-                    task = lesson.get("task")
-                    if task and lesson.get("date") == _tomorrow:
-                        logger.info(f"RAW FULL lesson: subject={lesson.get('subject')!r} date={lesson.get('date')!r} docs_for_lesson={json.dumps(lesson.get('docs_for_lesson'), ensure_ascii=False, default=str)[:1000]}")
-                        for idx, t in enumerate(task):
-                            logger.info(f"RAW FULL task[{idx}]: {json.dumps(t, ensure_ascii=False, default=str)[:2000]}")
+
         return [Lesson.from_dict(lesson) for lesson in result]
 
     async def get_classmates(self) -> List[Classmate]:
@@ -795,7 +785,55 @@ async def download_homework_file(
     except Exception as e:
         logger.warning(f"File download with auth error: {e}")
 
-    logger.warning(f"Could not download file: {url[:100]}")
+    return None
+
+
+async def fetch_homework_detail(
+    hw_id: int,
+    child_id: int,
+    hw_type: str,
+    login: str,
+    password: str,
+    timeout: float = 15.0,
+) -> Optional[Dict[str, Any]]:
+    """
+    Получить детальную информацию о домашнем задании через API.
+
+    cabinet.ruobr.ru использует endpoint /journal/homework/detail/
+    с параметрами pk (homework id), child (child api id), hw_type.
+    Пробуем api3d.ruobr.ru как backend API.
+    """
+    import base64
+
+    username_b64 = base64.b64encode(login.upper().encode("UTF-8")).decode("UTF-8")
+    password_b64 = base64.b64encode(password.encode("UTF-8")).decode("UTF-8")
+    auth_headers = {"username": username_b64, "password": password_b64}
+
+    # Пробуем несколько вариантов endpoint
+    endpoints = [
+        f"https://api3d.ruobr.ru/homework/detail/?pk={hw_id}&child={child_id}&hw_type={hw_type}",
+        f"https://api3d.ruobr.ru/journal/homework/detail/?pk={hw_id}&child={child_id}&hw_type={hw_type}",
+    ]
+
+    for url in endpoints:
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                resp = await client.get(url, headers=auth_headers)
+                logger.info(f"HW detail API [{url.split('ruobr.ru')[1]}]: status={resp.status_code} content_type={resp.headers.get('content-type','')[:50]}")
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                        logger.info(f"HW detail response keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+                        logger.info(f"HW detail FULL: {json.dumps(data, ensure_ascii=False, default=str)[:3000]}")
+                        return data if isinstance(data, dict) else {}
+                    except Exception:
+                        # Не JSON — возможно HTML страница
+                        text_preview = resp.text[:200]
+                        logger.info(f"HW detail non-JSON response: {text_preview}")
+        except Exception as e:
+            logger.info(f"HW detail API error for {url.split('ruobr.ru')[1]}: {e}")
+
+    logger.info("HW detail: all endpoints failed")
     return None
 
 

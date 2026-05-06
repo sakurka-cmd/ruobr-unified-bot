@@ -16,7 +16,8 @@ from ..config import config
 from ..database import UserConfig
 from ..services import (
     Child, Lesson, get_children_async, get_timetable_for_children,
-    RuobrError, NetworkError, AuthenticationError, download_homework_file
+    RuobrError, NetworkError, AuthenticationError, download_homework_file,
+    fetch_homework_detail,
 )
 from ..utils.formatters import (
     format_lesson, format_homework, format_mark, format_date,
@@ -275,6 +276,8 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                     
                     # Собираем файлы для отправки
                     files = extract_homework_files(hw_text)
+                    if files:
+                        logger.info(f"EXTRACTED {len(files)} files from text for {lesson.subject} hw_id={hw.get('id')}: {files}")
                     for file_type, file_url in files:
                         all_files.append((file_type, file_url, lesson.subject))
 
@@ -292,6 +295,14 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                             else:
                                 # Попробуем как относительный путь к медиа
                                 all_files.append(("doc", f"https://ruobr.ru/media/{doc_str}", lesson.subject))
+
+                # Пробуем получить детали ДЗ через отдельный API (для первого задания)
+                if not hasattr(cmd_hw, '_detail_fetched'):
+                    cmd_hw._detail_fetched = True
+                    hw_id = hw.get("id")
+                    hw_type = hw.get("type", "group")
+                    if hw_id:
+                        detail = await fetch_homework_detail(hw_id, child.id, hw_type, login, password)
 
                 # Обработка docs_for_lesson (новое поле — вложения на уровне урока)
                 if lesson.docs_for_lesson:
@@ -318,11 +329,14 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
             await safe_edit_message(status_msg, text)
             
             # Отправляем файлы отдельными сообщениями
+            logger.info(f"FILE SEND: total {len(all_files)} files to send")
             if all_files:
-                for file_type, file_url, subject in all_files:
+                for idx, (file_type, file_url, subject) in enumerate(all_files):
+                    logger.info(f"FILE SEND [{idx}]: type={file_type} url={file_url[:120]} subject={subject}")
                     sent = False
                     # 1) Скачиваем файл через авторизованную сессию Ruobr
                     downloaded = await download_homework_file(file_url, login, password)
+                    logger.info(f"FILE SEND [{idx}]: download result={'OK '+str(len(downloaded[0]))+' bytes' if downloaded else 'FAILED'}")
                     if downloaded:
                         file_bytes, filename = downloaded
                         try:
@@ -350,6 +364,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
 
                     # 2) Fallback: передаём URL напрямую (Telegram скачает сам)
                     if not sent:
+                        logger.info(f"FILE SEND [{idx}]: trying URL fallback")
                         try:
                             if file_type == 'img':
                                 await asyncio.wait_for(
@@ -367,6 +382,7 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
 
                     # 3) Последний fallback: отправляем ссылку текстом
                     if not sent:
+                        logger.info(f"FILE SEND [{idx}]: sending as text link")
                         try:
                             await message.answer(f"📎 <a href=\"{file_url}\">Файл: {subject}</a>")
                         except Exception:
