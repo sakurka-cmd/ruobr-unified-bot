@@ -632,18 +632,17 @@ class RuobrClient:
             logger.warning(f"Unexpected timetable response type: {type(result)}")
             return []
 
-        # DEBUG: log raw lesson data
+        # DEBUG: dump full raw lesson dict for lessons with homework
         if result and isinstance(result, list):
-            for lesson in result[:10]:
+            from datetime import date as _date
+            _tomorrow = _date.today().strftime("%Y-%m-%d")
+            for lesson in result:
                 if isinstance(lesson, dict):
-                    dfl = lesson.get("docs_for_lesson")
-                    if dfl:
-                        logger.info(f"RAW docs_for_lesson: {json.dumps(dfl, ensure_ascii=False, default=str)[:2000]}")
                     task = lesson.get("task")
-                    if task:
-                        for t in task:
-                            if t.get("doc") or t.get("doc_str"):
-                                logger.info(f"RAW doc hw item: {json.dumps(t, ensure_ascii=False, default=str)[:2000]}")
+                    if task and lesson.get("date") == _tomorrow:
+                        logger.info(f"RAW FULL lesson: subject={lesson.get('subject')!r} date={lesson.get('date')!r} docs_for_lesson={json.dumps(lesson.get('docs_for_lesson'), ensure_ascii=False, default=str)[:1000]}")
+                        for idx, t in enumerate(task):
+                            logger.info(f"RAW FULL task[{idx}]: {json.dumps(t, ensure_ascii=False, default=str)[:2000]}")
         return [Lesson.from_dict(lesson) for lesson in result]
 
     async def get_classmates(self) -> List[Classmate]:
