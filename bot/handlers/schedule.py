@@ -277,6 +277,21 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                     files = extract_homework_files(hw_text)
                     for file_type, file_url in files:
                         all_files.append((file_type, file_url, lesson.subject))
+
+                    # Обработка нового поля doc (вложения документов)
+                    if hw.get("doc"):
+                        doc_str = hw.get("doc_str", "")
+                        logger.info(f"DOC attachment found: doc_str={doc_str!r} hw_id={hw.get('id')}")
+                        if doc_str:
+                            # doc_str может быть URL, путём или именем файла
+                            if doc_str.startswith(("http", "//")):
+                                file_url = "https:" + doc_str if doc_str.startswith("//") else doc_str
+                                all_files.append(("doc", file_url, lesson.subject))
+                            elif doc_str.startswith("/"):
+                                all_files.append(("doc", f"https://ruobr.ru{doc_str}", lesson.subject))
+                            else:
+                                # Попробуем как относительный путь к медиа
+                                all_files.append(("doc", f"https://ruobr.ru/media/{doc_str}", lesson.subject))
         
         if not found:
             await safe_edit_message(status_msg, "ℹ️ На завтра домашнее задание не найдено.")

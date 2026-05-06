@@ -1,4 +1,5 @@
 """
+import json
 Асинхронный клиент для Ruobr API.
 Реализует неблокирующие запросы с повторными попытками и обработкой ошибок.
 Использует AsyncRuobr из ruobr_api для нативных асинхронных запросов
@@ -629,6 +630,16 @@ class RuobrClient:
             logger.warning(f"Unexpected timetable response type: {type(result)}")
             return []
 
+        # DEBUG: log raw lesson dict keys for first lesson with task
+        if result:
+            sample = result[0] if isinstance(result, list) else result
+            if isinstance(sample, dict):
+                logger.info(f"RAW lesson dict keys: {list(sample.keys())}")
+                # Log full sample for first lesson with homework
+                for lesson in result[:5]:
+                    if isinstance(lesson, dict) and lesson.get("task"):
+                        logger.info(f"RAW lesson with HW: {json.dumps(lesson, ensure_ascii=False, default=str)[:3000]}")
+                        break
         return [Lesson.from_dict(lesson) for lesson in result]
 
     async def get_classmates(self) -> List[Classmate]:
