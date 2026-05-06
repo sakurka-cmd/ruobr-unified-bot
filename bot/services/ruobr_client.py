@@ -1,11 +1,11 @@
 """
-import json
 Асинхронный клиент для Ruobr API.
 Реализует неблокирующие запросы с повторными попытками и обработкой ошибок.
 Использует AsyncRuobr из ruobr_api для нативных асинхронных запросов
 без блокировки потоков (asyncio.to_thread).
 """
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -165,6 +165,7 @@ class Lesson:
     room: str
     homework: List[Dict[str, Any]]
     marks: List[Dict[str, Any]]
+    docs_for_lesson: List[Dict[str, Any]]
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Lesson':
@@ -176,7 +177,8 @@ class Lesson:
             topic=data.get("topic", ""),
             room=data.get("room", ""),
             homework=data.get("task", []) or [],
-            marks=data.get("marks", []) or []
+            marks=data.get("marks", []) or [],
+            docs_for_lesson=data.get("docs_for_lesson", []) or [],
         )
 
 
@@ -630,16 +632,18 @@ class RuobrClient:
             logger.warning(f"Unexpected timetable response type: {type(result)}")
             return []
 
-        # DEBUG: log raw lesson dict keys for first lesson with task
-        if result:
-            sample = result[0] if isinstance(result, list) else result
-            if isinstance(sample, dict):
-                logger.info(f"RAW lesson dict keys: {list(sample.keys())}")
-                # Log full sample for first lesson with homework
-                for lesson in result[:5]:
-                    if isinstance(lesson, dict) and lesson.get("task"):
-                        logger.info(f"RAW lesson with HW: {json.dumps(lesson, ensure_ascii=False, default=str)[:3000]}")
-                        break
+        # DEBUG: log raw lesson data
+        if result and isinstance(result, list):
+            for lesson in result[:10]:
+                if isinstance(lesson, dict):
+                    dfl = lesson.get("docs_for_lesson")
+                    if dfl:
+                        logger.info(f"RAW docs_for_lesson: {json.dumps(dfl, ensure_ascii=False, default=str)[:2000]}")
+                    task = lesson.get("task")
+                    if task:
+                        for t in task:
+                            if t.get("doc") or t.get("doc_str"):
+                                logger.info(f"RAW doc hw item: {json.dumps(t, ensure_ascii=False, default=str)[:2000]}")
         return [Lesson.from_dict(lesson) for lesson in result]
 
     async def get_classmates(self) -> List[Classmate]:

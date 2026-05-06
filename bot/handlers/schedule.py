@@ -292,6 +292,24 @@ async def cmd_hwtomorrow(message: Message, user_config: Optional[UserConfig] = N
                             else:
                                 # Попробуем как относительный путь к медиа
                                 all_files.append(("doc", f"https://ruobr.ru/media/{doc_str}", lesson.subject))
+
+                # Обработка docs_for_lesson (новое поле — вложения на уровне урока)
+                if lesson.docs_for_lesson:
+                    logger.info(f"docs_for_lesson for {lesson.subject}: count={len(lesson.docs_for_lesson)}")
+                    for doc_item in lesson.docs_for_lesson:
+                        if isinstance(doc_item, dict):
+                            doc_file = doc_item.get("file", "")
+                            doc_name = doc_item.get("name", "") or doc_item.get("title", "")
+                            doc_url = doc_item.get("url", "") or doc_item.get("link", "")
+                            logger.info(f"  doc_item: {doc_item}")
+                            # Ищем URL в любом из полей
+                            for field_val in [doc_file, doc_url, doc_name]:
+                                if field_val and isinstance(field_val, str):
+                                    if field_val.startswith(("http", "//")):
+                                        url = "https:" + field_val if field_val.startswith("//") else field_val
+                                        all_files.append(("doc", url, lesson.subject))
+                                    elif field_val.startswith("/"):
+                                        all_files.append(("doc", f"https://ruobr.ru{field_val}", lesson.subject))
         
         if not found:
             await safe_edit_message(status_msg, "ℹ️ На завтра домашнее задание не найдено.")
