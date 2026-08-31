@@ -40,6 +40,7 @@ except ImportError:
 
 from bot.config import config
 from bot.database import db_pool
+from bot.memwatch import memwatch
 from bot.middlewares import (
     RateLimitMiddleware,
     AuthMiddleware,
@@ -93,6 +94,11 @@ from bot.vk import run_vk_bot
 async def main() -> None:
     setup_logging()
     logger.info("Starting Ruobr Unified Bot (TG+VK)")
+
+    # Диагностика памяти: tracemalloc + периодический RSS-лог + soft-limit watchdog
+    memwatch.start(config.data_dir)
+    memwatch.install_signal_handler()
+    memwatch.install_trim_handler()
 
     await db_pool.initialize()
     logger.info("Database initialized")

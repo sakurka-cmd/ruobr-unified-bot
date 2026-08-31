@@ -18,3 +18,5 @@ data/
 Thumbs.db
 *.tmp
 *.bak
+data-prod/
+.vkbottle/
