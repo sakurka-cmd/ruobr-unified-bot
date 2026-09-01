@@ -90,6 +90,7 @@ class MemWatch:
     def __init__(self):
         self._baseline = None
         self._baseline_time = None
+        self._baseline_types = None
         self._task = None
         self._report_path = None
 
@@ -144,8 +145,8 @@ class MemWatch:
                 rss = _rss_mb()
                 cur, peak = tracemalloc.get_traced_memory()
                 msg = (
-                    f"memwatch #{n}: rss={rss:.0f}MB traced_current={cur/1048576:.0f}MB "
-                    f"traced_peak={peak/1048576:.0f}MB uptime={int((time.time()-PROCESS_START)/3600)}h | {_gc_stats()}"
+                    f"memwatch #{n}: rss={rss:.0f}MB traced_current={cur/1048576:.2f}MB "
+                    f"traced_peak={peak/1048576:.2f}MB uptime={int((time.time()-PROCESS_START)/3600)}h | {_gc_stats()}"
                 )
                 if rss > MEMWATCH_SOFT_LIMIT_MB:
                     logger.critical(msg + " | SOFT LIMIT EXCEEDED — graceful restart")
@@ -156,14 +157,14 @@ class MemWatch:
                     # Базовый снапшот через ~1 час — стартовые аллокации уже устаканились
                     self._baseline = tracemalloc.take_snapshot()
                     self._baseline_time = time.time()
+                    self._baseline_types = Counter(type(o).__name__ for o in gc.get_objects())
                     logger.info("memwatch: baseline snapshot taken")
                 if n % 4 == 0:
                     logger.info("memwatch top-5 (current):\n" + "\n".join(_top_lines(tracemalloc.take_snapshot())))
-                # Раз в час пробуем trim — если освобождает >50MB, это фрагментация
-                if n % 4 == 2:
+                # Каждые 30 мин trim с обязательным логом — временной ряд для диагностики фрагментации
+                if n % 2 == 0:
                     freed = _malloc_trim()
-                    if freed > 50:
-                        logger.info(f"memwatch: periodic malloc_trim freed {freed:.0f}MB — fragmentation suspected")
+                    logger.info(f"memwatch: periodic malloc_trim freed {freed:.0f}MB, rss after {_rss_mb():.0f}MB")
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -174,39 +175,50 @@ class MemWatch:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         rss = _rss_mb()
         cur, peak = tracemalloc.get_traced_memory()
-        lines.append(f"===== memwatch report {ts} | rss={rss:.0f}MB cur={cur/1048576:.0f}MB peak={peak/1048576:.0f}MB =====")
+        lines.append(f"===== memwatch report {ts} | rss={rss:.0f}MB cur={cur/1048576:.2f}MB peak={peak/1048576:.2f}MB =====")
         lines.append(f"gc: {_gc_stats()}")
 
         snap = tracemalloc.take_snapshot()
         lines.append("--- TOP current allocations (lineno) ---")
         for st in snap.statistics("lineno")[:limit]:
             f0 = st.traceback[0]
-            lines.append(f"  {st.size/1048576:8.2f} MB  {st.count:9d}  {f0.filename}:{f0.lineno}")
+            lines.append(f"  {st.size/1048576:8.3f} MB  {st.count:9d}  {f0.filename}:{f0.lineno}")
 
         if self._baseline is not None:
             hours = (time.time() - self._baseline_time) / 3600
-            lines.append(f"--- TOP growth since baseline ({hours:.1f}h ago, lineno) ---")
+            lines.append(f"--- TOP growth since baseline ({hours:.2f}h ago, lineno) ---")
             diffs = snap.compare_to(self._baseline, "lineno")
-            diffs = [d for d in diffs if d.size_diff > 0]
-            diffs.sort(key=lambda d: -d.size_diff)
-            for d in diffs[:limit]:
+            positive = [d for d in diffs if d.size_diff > 0]
+            total_pos = sum(d.size_diff for d in positive) / 1048576
+            negative = [d for d in diffs if d.size_diff < 0]
+            total_neg = sum(d.size_diff for d in negative) / 1048576
+            lines.append(f"  SUM positive diff: +{total_pos:.2f} MB | SUM negative diff: {total_neg:.2f} MB | net: {total_pos+total_neg:+.2f} MB")
+            positive.sort(key=lambda d: -d.size_diff)
+            for d in positive[:limit]:
                 f0 = d.traceback[0]
-                lines.append(f"  +{d.size_diff/1048576:8.2f} MB ({d.size/1048576:8.2f} MB now)  {f0.filename}:{f0.lineno}")
+                lines.append(f"  +{d.size_diff/1048576:8.3f} MB ({d.size/1048576:8.3f} MB now, cnt {d.count_diff:+d})  {f0.filename}:{f0.lineno}")
 
-            lines.append(f"--- TOP growth since baseline (traceback) ---")
+            lines.append("--- TOP growth since baseline (traceback) ---")
             diffs = snap.compare_to(self._baseline, "traceback")
             diffs = [d for d in diffs if d.size_diff > 0]
             diffs.sort(key=lambda d: -d.size_diff)
             for d in diffs[:limit // 2]:
-                lines.append(f"  +{d.size_diff/1048576:8.2f} MB ({d.size/1048576:8.2f} MB now)")
+                lines.append(f"  +{d.size_diff/1048576:8.3f} MB ({d.size/1048576:8.3f} MB now)")
                 for fr in d.traceback[-4:]:
                     lines.append(f"      {fr.filename}:{fr.lineno}")
 
-        # Типы объектов
+        # Типы объектов + diff vs baseline
         type_counts = Counter(type(o).__name__ for o in gc.get_objects())
         lines.append("--- GC object types (top 20) ---")
         for tname, cnt in type_counts.most_common(20):
             lines.append(f"  {cnt:10d}  {tname}")
+        if self._baseline_types is not None:
+            tdelta = {t: type_counts.get(t, 0) - c for t, c in self._baseline_types.items()}
+            grown = sorted(tdelta.items(), key=lambda kv: -kv[1])[:15]
+            lines.append("--- GC type growth since baseline ---")
+            for tname, delta in grown:
+                if delta != 0:
+                    lines.append(f"  {delta:+10d}  {tname}")
         return lines
 
     def write_report(self):
